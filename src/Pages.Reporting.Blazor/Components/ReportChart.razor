@@ -1,0 +1,24 @@
+@* figure's browser-default margins (16px + 40px sides) would shift the chart off the
+   designer/grid position — zero them structurally. *@
+<figure class="pr-chart @Element.CssClass"
+        style="@StyleCss.Concat("margin:0;", StyleCss.Inline(Element.Style))">
+    @if (!string.IsNullOrEmpty(Element.Title))
+    {
+        <figcaption style="font-weight:600;font-size:13.5px;margin-bottom:6px">@Element.Title</figcaption>
+    }
+    @if (Data.Error is not null)
+    {
+        <div class="pr-error">@Data.Error</div>
+    }
+    else
+    {
+        @((MarkupString)SvgChartRenderer.Render(Element, Data.Table))
+    }
+</figure>
+
+@code {
+    [Parameter, EditorRequired] public required ChartElement Element { get; set; }
+    [CascadingParameter] public required ResolvedReport Resolved { get; set; }
+
+    private ResolvedData Data => Resolved.GetData(Element);
+}

@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/Pages.Reporting.Demo/Pages.Reporting.Demo.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Pages.Reporting.Blazor/Pages.Reporting.Blazor.csproj" />
+    <Project Path="src/Pages.Reporting.Core/Pages.Reporting.Core.csproj" />
+    <Project Path="src/Pages.Reporting.Designer/Pages.Reporting.Designer.csproj" />
+    <Project Path="src/Pages.Reporting.Export/Pages.Reporting.Export.csproj" />
+  </Folder>
+</Solution>

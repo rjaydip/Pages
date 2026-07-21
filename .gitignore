@@ -1,0 +1,11 @@
+bin/
+obj/
+*.user
+.vs/
+.idea/
+demo.db
+demo.db-*
+pages-reporting.key
+.DS_Store
+.vscode/
+.claude/settings.local.json

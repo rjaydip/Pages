@@ -1,0 +1,40 @@
+<div class="pr-cell" style="@CellStyle">
+    @switch (Element)
+    {
+        case TextElement text:
+            <ReportText Element="text" />
+            break;
+        case TitleElement title:
+            <ReportTitle Element="title" />
+            break;
+        case ValueElement value:
+            <ReportValue Element="value" />
+            break;
+        case KpiCardElement kpi:
+            <KpiCard Element="kpi" />
+            break;
+        case TableElement table:
+            <ReportTable Element="table" />
+            break;
+        case ChartElement chart:
+            <ReportChart Element="chart" />
+            break;
+        case SectionElement section:
+            <ReportSection Element="section" />
+            break;
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public required ReportElement Element { get; set; }
+
+    /// <summary>Span used when the element has none — row sections split evenly.</summary>
+    [Parameter] public int DefaultSpan { get; set; } = 12;
+
+    // display:grid makes the single child stretch to fill the cell, so a component's
+    // border/background covers the whole spanned area (rowSpan/minHeight), not just its content.
+    private string CellStyle =>
+        $"grid-column:span {Math.Clamp(Element.ColumnSpan ?? DefaultSpan, 1, 12)};min-width:0;display:grid"
+        + (Element.RowSpan is > 1 and { } rows ? $";grid-row:span {Math.Clamp(rows, 1, 24)}" : string.Empty)
+        + (StyleCss.Length(Element.MinHeight) is { } height ? $";min-height:{height}" : string.Empty);
+}

@@ -1,0 +1,132 @@
+@namespace Pages.Reporting.Designer.Internal
+
+<aside class="rd-sidebar">
+    <div class="rd-tabs">
+        <button type="button" class="@(_tab == Tab.Components ? "rd-tab-active" : null)"
+                @onclick="() => _tab = Tab.Components">Components</button>
+        <button type="button" class="@(_tab == Tab.Data ? "rd-tab-active" : null)"
+                @onclick="() => _tab = Tab.Data">Data</button>
+    </div>
+
+    @if (_tab == Tab.Components)
+    {
+        @foreach (var tile in Tiles)
+        {
+            <div class="rd-tile" draggable="true" data-drag="palette:@tile.Type"
+                 @ondragstart="() => OnDragStart.InvokeAsync(tile.Type)"
+                 @ondragend="() => OnDragEnd.InvokeAsync()">
+                <span class="rd-tile-icon">@((MarkupString)tile.Icon)</span>
+                <span class="rd-tile-text">
+                    <span class="rd-tile-label">@tile.Label</span>
+                    <span class="rd-tile-hint">@tile.Hint</span>
+                </span>
+            </div>
+        }
+    }
+    else
+    {
+        <div class="rd-tree">
+            <div class="rd-tree-group">
+                <span class="rd-tree-head">Connections (@Report.Connections.Count)</span>
+                <button type="button" class="rd-tree-add" title="Add connection" @onclick="AddConnection">+</button>
+            </div>
+            @foreach (var connection in Report.Connections)
+            {
+                <button type="button" class="rd-tree-item @(ReferenceEquals(connection, Selection) ? "rd-tree-selected" : null)"
+                        @key="connection" @onclick="() => OnSelectItem.InvokeAsync(connection)">
+                    @(string.IsNullOrWhiteSpace(connection.Name) ? "(unnamed)" : connection.Name)
+                </button>
+            }
+
+            <div class="rd-tree-group">
+                <span class="rd-tree-head">Data sets (@Report.DataSets.Count)</span>
+                <button type="button" class="rd-tree-add" title="Add data set" @onclick="AddDataSet">+</button>
+            </div>
+            @foreach (var dataSet in Report.DataSets)
+            {
+                <button type="button" class="rd-tree-item @(ReferenceEquals(dataSet, Selection) ? "rd-tree-selected" : null)"
+                        @key="dataSet" @onclick="() => OnSelectItem.InvokeAsync(dataSet)">
+                    @(string.IsNullOrWhiteSpace(dataSet.Name) ? "(unnamed)" : dataSet.Name)
+                </button>
+            }
+
+            <div class="rd-tree-group">
+                <span class="rd-tree-head">Parameters (@Report.Parameters.Count)</span>
+                <button type="button" class="rd-tree-add" title="Add parameter" @onclick="AddParameter">+</button>
+            </div>
+            @foreach (var parameter in Report.Parameters)
+            {
+                <button type="button" class="rd-tree-item @(ReferenceEquals(parameter, Selection) ? "rd-tree-selected" : null)"
+                        @key="parameter" @onclick="() => OnSelectItem.InvokeAsync(parameter)">
+                    @@@(string.IsNullOrWhiteSpace(parameter.Name) ? "(unnamed)" : parameter.Name)
+                </button>
+            }
+        </div>
+    }
+</aside>
+
+@code {
+    [Parameter, EditorRequired] public required Report Report { get; set; }
+    [Parameter] public object? Selection { get; set; }
+    [Parameter] public EventCallback<string> OnDragStart { get; set; }
+    [Parameter] public EventCallback OnDragEnd { get; set; }
+    [Parameter] public EventCallback<object> OnSelectItem { get; set; }
+
+    private enum Tab { Components, Data }
+
+    private Tab _tab = Tab.Components;
+
+    private async Task AddConnection()
+    {
+        var connection = new ConnectionDefinition
+        {
+            Name = Report.Connections.Count == 0 ? "main" : $"connection{Report.Connections.Count + 1}",
+            Provider = DatabaseProvider.Sqlite,
+            ConnectionString = string.Empty,
+        };
+        Report.Connections.Add(connection);
+        await OnSelectItem.InvokeAsync(connection);
+    }
+
+    private async Task AddDataSet()
+    {
+        var dataSet = new DataSetDefinition
+        {
+            Name = Report.DataSets.Count == 0 ? "data" : $"data{Report.DataSets.Count + 1}",
+            Binding = new SqlBinding
+            {
+                Connection = Report.Connections.FirstOrDefault()?.Name ?? string.Empty,
+                Sql = string.Empty,
+            },
+        };
+        Report.DataSets.Add(dataSet);
+        await OnSelectItem.InvokeAsync(dataSet);
+    }
+
+    private async Task AddParameter()
+    {
+        var parameter = new ParameterDefinition
+        {
+            Name = $"param{Report.Parameters.Count + 1}",
+            DefaultValue = string.Empty,
+        };
+        Report.Parameters.Add(parameter);
+        await OnSelectItem.InvokeAsync(parameter);
+    }
+
+    private const string Stroke = "stroke='#5a5f66' stroke-width='1.6' stroke-linecap='round' fill='none'";
+
+    private static readonly (string Type, string Label, string Hint, string Icon)[] Tiles =
+    [
+        ("text", "Text", "text + {data} values",
+            $"<svg viewBox='0 0 20 20'><path d='M4 5h12M10 5v10' {Stroke}/><path d='M4 16h7' {Stroke}/></svg>"),
+        ("table", "Table", "rows from a data set",
+            $"<svg viewBox='0 0 20 20'><rect x='3' y='4' width='14' height='12' rx='1.5' {Stroke}/><path d='M3 8h14M8 8v8M13 8v8' {Stroke}/></svg>"),
+        ("chart", "Chart", "bar, line, or pie",
+            $"<svg viewBox='0 0 20 20'><path d='M4 16V9M9 16V4M14 16v-5' {Stroke}/><path d='M3 17h14' {Stroke}/></svg>"),
+        ("kpiCard", "KPI card", "headline metric",
+            $"<svg viewBox='0 0 20 20'><rect x='3' y='4' width='14' height='12' rx='2' {Stroke}/><path d='M6 8h5M6 12h8' {Stroke}/></svg>"),
+        ("section", "Section", "row / column layout",
+            $"<svg viewBox='0 0 20 20'><rect x='3' y='4' width='6' height='12' rx='1.5' {Stroke}/><rect x='11' y='4' width='6' height='12' rx='1.5' {Stroke}/></svg>"),
+    ];
+}

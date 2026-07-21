@@ -1,0 +1,30 @@
+<section class="pr-section @(Element.Direction == SectionDirection.Row ? "pr-row" : "pr-column") @Element.CssClass" style="@StyleCss.Inline(Element.Style)">
+    @if (!string.IsNullOrEmpty(Element.Title))
+    {
+        <h2 class="pr-section-title" style="margin:0 0 6px;font-size:15px;font-weight:650">@Element.Title</h2>
+    }
+    <div class="pr-section-body" style="display:grid;grid-template-columns:repeat(12,1fr);gap:@StyleCss.Gap(Resolved.Definition.Spacing)">
+        @foreach (var child in Element.Children)
+        {
+            <ReportElementView Element="child" DefaultSpan="DefaultChildSpan" />
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public required SectionElement Element { get; set; }
+    [CascadingParameter] public required ResolvedReport Resolved { get; set; }
+
+    // Custom column count wins; otherwise Row sections split evenly (pre-columnSpan rule).
+    private int DefaultChildSpan
+    {
+        get
+        {
+            if (Element.Columns is { } columns && columns > 0)
+                return Math.Max(1, 12 / Math.Clamp(columns, 1, 12));
+            return Element.Direction == SectionDirection.Row && Element.Children.Count > 0
+                ? Math.Max(1, 12 / Element.Children.Count)
+                : 12;
+        }
+    }
+}

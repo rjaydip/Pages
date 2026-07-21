@@ -1,0 +1,157 @@
+@page "/reports/new"
+@page "/reports/{Id:int}/builder"
+@rendermode InteractiveServer
+@using global::Pages.Reporting.Core.Serialization
+@using global::Pages.Reporting.Demo.Components.Builder
+@inject ReportRepository Reports
+@inject ReportJson ReportJson
+@inject NavigationManager Nav
+
+<PageTitle>Report builder — Pages.Reporting demo</PageTitle>
+
+@if (_report is null)
+{
+    <p>Report not found.</p>
+}
+else
+{
+    <div class="demo-toolbar">
+        <a class="demo-button" href="@(Id is int id ? $"/reports/{id}" : "/")">← Back</a>
+        <span class="spacer"></span>
+        <button class="demo-button" @onclick="Preview">Preview</button>
+        <button class="demo-button primary" @onclick="Save">Save</button>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="demo-error">@_error</div>
+    }
+    @if (_saved)
+    {
+        <div class="demo-success">Saved.</div>
+    }
+
+    <div class="b-panel demo-card">
+        <h2 class="b-head">Report settings</h2>
+        <div class="b-grid">
+            <label class="b-field"><span>Report name</span><input @bind="_report.Name" /></label>
+            <label class="b-field">
+                <span>PDF page size</span>
+                <select @bind="_report.Page.Size">
+                    <option>A4</option>
+                    <option>A3</option>
+                    <option>Letter</option>
+                    <option>Legal</option>
+                </select>
+            </label>
+            <label class="b-field b-check">
+                <input type="checkbox" @bind="_report.Page.Landscape" />
+                <span>Landscape PDF</span>
+            </label>
+        </div>
+    </div>
+
+    <div class="b-panel demo-card">
+        <h2 class="b-head">Connections</h2>
+        <p class="demo-note">
+            Referenced by name from element bindings. Connection strings are encrypted when the
+            report is saved — an existing one shows its <code>enc:v1:…</code> token; paste a new
+            plaintext value to replace it.
+        </p>
+        @foreach (var connection in _report.Connections)
+        {
+            <div class="b-column-row b-connection" @key="connection">
+                <input placeholder="Name" @bind="connection.Name" />
+                <select @bind="connection.Provider">
+                    <option value="@DatabaseProvider.Sqlite">SQLite</option>
+                    <option value="@DatabaseProvider.SqlServer">SQL Server</option>
+                    <option value="@DatabaseProvider.PostgreSql">PostgreSQL</option>
+                    <option value="@DatabaseProvider.MySql">MySQL</option>
+                </select>
+                <input class="b-wide" placeholder="Connection string" @bind="connection.ConnectionString" />
+                <button type="button" class="b-icon b-danger" title="Remove connection"
+                        @onclick="() => _report.Connections.Remove(connection)">✕</button>
+            </div>
+        }
+        <button type="button" class="demo-button b-small" @onclick="AddConnection">+ Add connection</button>
+    </div>
+
+    <div class="b-panel demo-card">
+        <h2 class="b-head">Elements</h2>
+        <ElementListEditor Elements="_report.Elements" Report="_report" />
+    </div>
+
+    @if (_showPreview)
+    {
+        <div class="b-panel demo-card">
+            <h2 class="b-head">Preview</h2>
+            <ReportView Report="_report" @key="_previewVersion" />
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private Report? _report;
+    private int? _loadedId = -1; // sentinel so first OnParametersSet always loads
+    private bool _showPreview;
+    private int _previewVersion;
+    private string? _error;
+    private bool _saved;
+
+    protected override void OnParametersSet()
+    {
+        if (_loadedId == Id)
+            return;
+        _loadedId = Id;
+
+        if (Id is int id)
+        {
+            var stored = Reports.Get(id);
+            _report = stored is null ? null : ReportJson.Deserialize(stored.Json);
+        }
+        else
+        {
+            _report = new Report { Name = "New report" };
+        }
+    }
+
+    private void AddConnection() =>
+        _report!.Connections.Add(new ConnectionDefinition
+        {
+            Name = _report.Connections.Count == 0 ? "main" : $"connection{_report.Connections.Count + 1}",
+            Provider = DatabaseProvider.Sqlite,
+            ConnectionString = string.Empty,
+        });
+
+    private void Preview()
+    {
+        _showPreview = true;
+        _previewVersion++; // recreate ReportView so it re-resolves the edited definition
+    }
+
+    private void Save()
+    {
+        _error = null;
+        _saved = false;
+        try
+        {
+            var json = ReportJson.Serialize(_report!); // encrypts any plaintext connection strings
+            if (Id is int id)
+            {
+                Reports.Save(id, _report!.Name, json);
+                _saved = true;
+            }
+            else
+            {
+                var newId = Reports.Insert(_report!.Name, json);
+                Nav.NavigateTo($"/reports/{newId}/builder");
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}

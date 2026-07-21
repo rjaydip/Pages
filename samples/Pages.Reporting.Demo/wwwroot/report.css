@@ -1,0 +1,8 @@
+/* Report styling shared by screen and PDF: linked in App.razor for the browser AND
+   passed to the exporter (ReportExportOptions.Css in Program.cs), so the downloaded
+   PDF uses the exact same rules as the on-screen report. Scoped to .pr-report — the
+   rest of app.css is demo chrome the report must not depend on. */
+.pr-report {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #0b0b0b;
+}

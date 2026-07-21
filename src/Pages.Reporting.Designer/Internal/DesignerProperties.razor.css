@@ -1,0 +1,259 @@
+.rd-props {
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+    background: #fff;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    box-sizing: border-box;
+    /* Fills the layout row and scrolls its own (long) content internally. */
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.rd-props-head {
+    margin: 0;
+    font-size: 14.5px;
+    font-weight: 650;
+    color: #1c1e21;
+}
+
+.rd-group-head {
+    font-weight: 650;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #8a8f97;
+    margin-top: 8px;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+    padding-top: 10px;
+}
+
+.rd-props-head + .rd-group-head {
+    border-top: none;
+    padding-top: 0;
+    margin-top: 2px;
+}
+
+.rd-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: #5a5f66;
+}
+
+.rd-field input,
+.rd-field select,
+.rd-field textarea {
+    border: 1px solid rgba(0, 0, 0, 0.16);
+    border-radius: 7px;
+    padding: 6px 9px;
+    font-size: 13px;
+    font-family: inherit;
+    color: #1c1e21;
+    background: #fff;
+    transition: border-color 0.1s ease;
+}
+
+.rd-field input:focus,
+.rd-field select:focus,
+.rd-field textarea:focus {
+    outline: none;
+    border-color: #1a66c2;
+}
+
+.rd-field textarea {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    resize: vertical;
+}
+
+.rd-subhead {
+    font-weight: 600;
+    font-size: 12px;
+    color: #1c1e21;
+    margin-top: 4px;
+}
+
+.rd-check {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12.5px;
+    color: #1c1e21;
+}
+
+.rd-check input {
+    accent-color: #1a66c2;
+}
+
+.rd-col-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    flex-wrap: wrap;
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+    padding-top: 6px;
+}
+
+.rd-col-name {
+    font-weight: 600;
+    font-size: 11.5px;
+    color: #1c1e21;
+    flex: 1 0 100%;
+}
+
+.rd-col-row input,
+.rd-col-row select {
+    border: 1px solid rgba(0, 0, 0, 0.16);
+    border-radius: 6px;
+    padding: 4px 7px;
+    font-size: 12px;
+    flex: 1 1 70px;
+    min-width: 0;
+}
+
+.rd-load {
+    border: 1px solid rgba(0, 0, 0, 0.16);
+    background: #fff;
+    border-radius: 7px;
+    padding: 5px 12px;
+    cursor: pointer;
+    font-size: 12.5px;
+    align-self: flex-start;
+    color: #1a66c2;
+    font-weight: 600;
+}
+
+.rd-load:hover {
+    background: rgba(26, 102, 194, 0.06);
+}
+
+.rd-load:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.rd-x {
+    border: none;
+    background: transparent;
+    color: #b33;
+    cursor: pointer;
+    padding: 1px 6px;
+    border-radius: 5px;
+}
+
+.rd-x:hover {
+    background: rgba(187, 51, 51, 0.08);
+}
+
+.rd-hint {
+    color: #8a8f97;
+    font-size: 12px;
+    margin: 2px 0;
+    line-height: 1.4;
+}
+
+.rd-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.rd-chip {
+    background: rgba(26, 102, 194, 0.08);
+    color: #1a66c2;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+.rd-remove {
+    border: 1px solid rgba(187, 51, 51, 0.4);
+    background: #fff;
+    border-radius: 7px;
+    padding: 5px 12px;
+    cursor: pointer;
+    font-size: 12.5px;
+    color: #b33;
+    font-weight: 600;
+    align-self: flex-start;
+    margin-top: 6px;
+}
+
+.rd-remove:hover {
+    background: rgba(187, 51, 51, 0.06);
+}
+
+.rd-error {
+    color: #b33;
+    font-size: 12px;
+    white-space: pre-wrap;
+    margin: 2px 0;
+    background: rgba(187, 51, 51, 0.06);
+    border-radius: 7px;
+    padding: 7px 9px;
+}
+
+.rd-ok {
+    color: #1e7e34;
+    font-size: 12.5px;
+    font-weight: 600;
+    margin: 2px 0;
+    background: rgba(30, 126, 52, 0.07);
+    border-radius: 7px;
+    padding: 7px 9px;
+}
+
+/* Saved encrypted connection: an informational state instead of an editable token. */
+.rd-locked {
+    font-size: 12.5px;
+    color: #5a5f66;
+    background: rgba(26, 102, 194, 0.06);
+    border: 1px solid rgba(26, 102, 194, 0.18);
+    border-radius: 7px;
+    padding: 8px 10px;
+    line-height: 1.45;
+}
+
+.rd-password {
+    display: flex;
+    gap: 5px;
+}
+
+.rd-password input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.rd-reveal {
+    border: 1px solid rgba(0, 0, 0, 0.16);
+    background: #fff;
+    border-radius: 7px;
+    padding: 0 10px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    color: #5a5f66;
+    flex: 0 0 auto;
+}
+
+.rd-reveal:hover {
+    border-color: #1a66c2;
+    color: #1a66c2;
+}
+
+/* Advanced raw connection string, collapsed by default. */
+.rd-adv summary {
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    color: #5a5f66;
+}
+
+.rd-adv[open] summary {
+    margin-bottom: 6px;
+}

@@ -1,0 +1,62 @@
+@page "/reports/designer"
+@page "/reports/{Id:int}/designer"
+@layout WideLayout
+@rendermode InteractiveServer
+@using global::Pages.Reporting.Designer
+@using global::Pages.Reporting.Core.Serialization
+@inject ReportRepository Reports
+@inject ReportJson ReportJson
+@inject NavigationManager Nav
+
+<PageTitle>Report designer — Pages.Reporting demo</PageTitle>
+
+<div class="demo-toolbar">
+    <a class="demo-button" href="/">← All reports</a>
+    @if (Id is int id)
+    {
+        <a class="demo-button" href="/reports/@id">View report</a>
+    }
+</div>
+
+@if (Id is not null && _json is null)
+{
+    <p>Report not found.</p>
+}
+else
+{
+    @* OnSave hands us the updated JSON — storing it (here: SQLite) is the app's job.
+       The wrapper just gives the designer the remaining viewport height; the designer
+       handles all scrolling internally. *@
+    <div class="demo-designer">
+        <ReportDesigner Json="@_json" OnSave="HandleSave" />
+    </div>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private string? _json;
+    private int? _loadedId = -1;
+
+    protected override void OnParametersSet()
+    {
+        if (_loadedId == Id)
+            return;
+        _loadedId = Id;
+        _json = Id is int id ? Reports.Get(id)?.Json : null;
+    }
+
+    private void HandleSave(string json)
+    {
+        var name = ReportJson.Deserialize(json).Name;
+        if (Id is int id)
+        {
+            Reports.Save(id, name, json);
+        }
+        else
+        {
+            var newId = Reports.Insert(name, json);
+            Nav.NavigateTo($"/reports/{newId}/designer");
+        }
+    }
+}

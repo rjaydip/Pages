@@ -1,0 +1,34 @@
+@if (Sql is not null)
+{
+    <div class="b-grid">
+        <label class="b-field">
+            <span>Connection</span>
+            <select @bind="Sql.Connection">
+                @if (Report.Connections.Count == 0)
+                {
+                    <option value="">— add a connection first —</option>
+                }
+                @foreach (var connection in Report.Connections)
+                {
+                    <option value="@connection.Name">@connection.Name (@connection.Provider)</option>
+                }
+            </select>
+        </label>
+    </div>
+    <label class="b-field">
+        <span>SQL @(Scalar ? "(must return a single value)" : "(returns the rows)")</span>
+        <textarea rows="3" @bind="Sql.Sql" spellcheck="false"></textarea>
+    </label>
+}
+else
+{
+    <p class="demo-note">This element uses an inline (static) data binding — edit it via the JSON editor.</p>
+}
+
+@code {
+    [Parameter, EditorRequired] public required DataBinding Binding { get; set; }
+    [Parameter, EditorRequired] public required Report Report { get; set; }
+    [Parameter] public bool Scalar { get; set; }
+
+    private SqlBinding? Sql => Binding as SqlBinding;
+}

@@ -1,0 +1,30 @@
+@page "/"
+@inject ReportRepository Reports
+
+<PageTitle>Reports — Pages.Reporting demo</PageTitle>
+
+<div class="demo-toolbar">
+    <h1 style="margin:0">Reports</h1>
+    <span class="spacer"></span>
+    <a class="demo-button" href="/reports/new">+ New (form builder)</a>
+    <a class="demo-button primary" href="/reports/designer">+ New report</a>
+</div>
+<p class="demo-note">
+    Each report below is a single JSON document stored in the demo's own SQLite database —
+    the library never persists anything. Open one to render it from that JSON, edit the JSON,
+    or download it as PDF/Excel.
+</p>
+
+<div class="demo-card">
+    <ul class="demo-list">
+        @foreach (var report in Reports.List())
+        {
+            <li>
+                <a href="/reports/@report.Id">
+                    <span>@report.Name</span>
+                    <span class="hint">view →</span>
+                </a>
+            </li>
+        }
+    </ul>
+</div>

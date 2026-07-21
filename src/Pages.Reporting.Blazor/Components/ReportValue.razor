@@ -1,0 +1,19 @@
+<div class="pr-value @Element.CssClass"
+     style="@StyleCss.Concat("display:flex;align-items:baseline;gap:10px;", StyleCss.Inline(Element.Style))">
+    <span class="pr-label" style="font-size:12.5px;color:#6a6f76">@Element.Label</span>
+    @if (Data.Error is not null)
+    {
+        <span class="pr-error-inline" title="@Data.Error">unavailable</span>
+    }
+    else
+    {
+        <span class="pr-figure" style="font-weight:600">@ValueFormatter.Format(Data.Scalar, Element.Format)</span>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public required ValueElement Element { get; set; }
+    [CascadingParameter] public required ResolvedReport Resolved { get; set; }
+
+    private ResolvedData Data => Resolved.GetData(Element);
+}

@@ -1,0 +1,116 @@
+@switch (Element)
+{
+    case TitleElement title:
+        <div class="b-grid">
+            <label class="b-field"><span>Text</span><input @bind="title.Text" /></label>
+            <label class="b-field"><span>Subtitle</span><input @bind="title.Subtitle" /></label>
+        </div>
+        break;
+
+    case ValueElement value:
+        <div class="b-grid">
+            <label class="b-field"><span>Label</span><input @bind="value.Label" /></label>
+            <label class="b-field"><span>Format (e.g. N2, C0)</span><input @bind="value.Format" /></label>
+        </div>
+        <BindingEditor Binding="value.Binding" Report="Report" Scalar="true" />
+        break;
+
+    case KpiCardElement kpi:
+        <div class="b-grid">
+            <label class="b-field"><span>Label</span><input @bind="kpi.Label" /></label>
+            <label class="b-field"><span>Format</span><input @bind="kpi.Format" /></label>
+            <label class="b-field"><span>Caption</span><input @bind="kpi.Caption" /></label>
+            <label class="b-field"><span>Accent color</span><input @bind="kpi.Accent" placeholder="#2a78d6" /></label>
+        </div>
+        <BindingEditor Binding="kpi.Binding" Report="Report" Scalar="true" />
+        break;
+
+    case ChartElement chart:
+        <div class="b-grid">
+            <label class="b-field"><span>Title</span><input @bind="chart.Title" /></label>
+            <label class="b-field">
+                <span>Chart type</span>
+                <select @bind="chart.ChartType">
+                    <option value="@ChartType.Bar">Bar</option>
+                    <option value="@ChartType.Line">Line</option>
+                    <option value="@ChartType.Pie">Pie</option>
+                </select>
+            </label>
+            <label class="b-field"><span>Label field (category column)</span><input @bind="chart.LabelField" /></label>
+            <label class="b-field"><span>Value fields (comma-separated)</span><input @bind="ValueFieldsText" /></label>
+            <label class="b-field"><span>Value format</span><input @bind="chart.Format" placeholder="#,0" /></label>
+            <label class="b-field"><span>Height (px)</span><input type="number" @bind="chart.Height" /></label>
+        </div>
+        <BindingEditor Binding="chart.Binding" Report="Report" />
+        break;
+
+    case TableElement table:
+        <div class="b-grid">
+            <label class="b-field"><span>Title</span><input @bind="table.Title" /></label>
+        </div>
+        <BindingEditor Binding="table.Binding" Report="Report" />
+        <div class="b-columns">
+            <span class="b-subhead">Columns <small>(leave empty to show every column the query returns)</small></span>
+            @foreach (var column in table.Columns)
+            {
+                <div class="b-column-row" @key="column">
+                    <input placeholder="Field" @bind="column.Field" />
+                    <input placeholder="Header" @bind="column.Header" />
+                    <input placeholder="Format" @bind="column.Format" />
+                    <select @bind="column.Align">
+                        <option value="@ColumnAlignment.Auto">Auto</option>
+                        <option value="@ColumnAlignment.Left">Left</option>
+                        <option value="@ColumnAlignment.Center">Center</option>
+                        <option value="@ColumnAlignment.Right">Right</option>
+                    </select>
+                    <select @bind="column.Aggregate">
+                        <option value="@ColumnAggregate.None">No total</option>
+                        <option value="@ColumnAggregate.Sum">Sum</option>
+                        <option value="@ColumnAggregate.Average">Average</option>
+                        <option value="@ColumnAggregate.Count">Count</option>
+                        <option value="@ColumnAggregate.Min">Min</option>
+                        <option value="@ColumnAggregate.Max">Max</option>
+                    </select>
+                    <button type="button" class="b-icon" title="Remove column"
+                            @onclick="() => table.Columns.Remove(column)">✕</button>
+                </div>
+            }
+            <button type="button" class="demo-button b-small"
+                    @onclick='() => table.Columns.Add(new ColumnDefinition { Field = "" })'>+ Add column</button>
+        </div>
+        break;
+
+    case SectionElement section:
+        <div class="b-grid">
+            <label class="b-field"><span>Title</span><input @bind="section.Title" /></label>
+            <label class="b-field">
+                <span>Layout</span>
+                <select @bind="section.Direction">
+                    <option value="@SectionDirection.Column">Stacked (column)</option>
+                    <option value="@SectionDirection.Row">Side by side (row)</option>
+                </select>
+            </label>
+        </div>
+        <div class="b-nested">
+            <span class="b-subhead">Elements in this section</span>
+            <ElementListEditor Elements="section.Children" Report="Report" />
+        </div>
+        break;
+}
+
+@code {
+    [Parameter, EditorRequired] public required ReportElement Element { get; set; }
+    [Parameter, EditorRequired] public required Report Report { get; set; }
+
+    private string ValueFieldsText
+    {
+        get => Element is ChartElement chart ? string.Join(", ", chart.ValueFields) : string.Empty;
+        set
+        {
+            if (Element is ChartElement chart)
+                chart.ValueFields = value
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToList();
+        }
+    }
+}

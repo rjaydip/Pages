@@ -1,0 +1,74 @@
+@for (var i = 0; i < Elements.Count; i++)
+{
+    var index = i;
+    var element = Elements[index];
+    <div class="b-item" @key="element">
+        <div class="b-item-head">
+            <span class="b-type">@TypeName(element)</span>
+            <span class="spacer"></span>
+            <button type="button" class="b-icon" title="Move up" disabled="@(index == 0)"
+                    @onclick="() => Move(index, -1)">↑</button>
+            <button type="button" class="b-icon" title="Move down" disabled="@(index == Elements.Count - 1)"
+                    @onclick="() => Move(index, 1)">↓</button>
+            <button type="button" class="b-icon b-danger" title="Remove" @onclick="() => Elements.RemoveAt(index)">✕</button>
+        </div>
+        <ElementEditor Element="element" Report="Report" />
+    </div>
+}
+
+<div class="b-add">
+    <select @bind="_newType">
+        <option value="title">Title</option>
+        <option value="kpiCard">KPI card</option>
+        <option value="value">Single value</option>
+        <option value="chart">Chart</option>
+        <option value="table">Table</option>
+        <option value="section">Section (layout)</option>
+    </select>
+    <button type="button" class="demo-button" @onclick="Add">+ Add element</button>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public required List<ReportElement> Elements { get; set; }
+    [Parameter, EditorRequired] public required Report Report { get; set; }
+
+    private string _newType = "title";
+
+    private void Add()
+    {
+        Elements.Add(_newType switch
+        {
+            "value" => new ValueElement { Label = "New value", Binding = NewBinding() },
+            "kpiCard" => new KpiCardElement { Label = "New KPI", Binding = NewBinding() },
+            "chart" => new ChartElement { Title = "New chart", LabelField = "", Binding = NewBinding() },
+            "table" => new TableElement { Title = "New table", Binding = NewBinding() },
+            "section" => new SectionElement { Direction = SectionDirection.Row },
+            _ => new TitleElement { Text = "New title" },
+        });
+    }
+
+    private SqlBinding NewBinding() => new()
+    {
+        Connection = Report.Connections.FirstOrDefault()?.Name ?? string.Empty,
+        Sql = string.Empty,
+    };
+
+    private void Move(int index, int delta)
+    {
+        var target = index + delta;
+        if (target < 0 || target >= Elements.Count)
+            return;
+        (Elements[index], Elements[target]) = (Elements[target], Elements[index]);
+    }
+
+    private static string TypeName(ReportElement element) => element switch
+    {
+        TitleElement => "Title",
+        ValueElement => "Single value",
+        KpiCardElement => "KPI card",
+        ChartElement chart => $"Chart · {chart.ChartType}",
+        TableElement => "Table",
+        SectionElement section => $"Section · {(section.Direction == SectionDirection.Row ? "row" : "column")}",
+        _ => element.GetType().Name,
+    };
+}

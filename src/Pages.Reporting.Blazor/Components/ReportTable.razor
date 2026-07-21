@@ -1,0 +1,115 @@
+<div class="pr-table-block @Element.CssClass" style="@StyleCss.Inline(Element.Style)">
+@if (!string.IsNullOrEmpty(Element.Title))
+{
+    <h3 class="pr-table-title" style="margin:0 0 6px;font-size:13.5px;font-weight:600">@Element.Title</h3>
+}
+@if (Data.Error is not null)
+{
+    <div class="pr-error">@Data.Error</div>
+}
+else if (Table is not null)
+{
+    @* Static, print-like table: full page width, every cell bordered, all rows shown.
+       The screen view is identical to the PDF. Override via pr-* classes / CssClass. *@
+    <table class="pr-table" style="width:100%;border-collapse:collapse">
+        <thead>
+        <tr>
+            @foreach (var column in Columns)
+            {
+                <th class="@AlignClass(column)" style="@CellStyle(column, header: true)">@HeaderText(column)</th>
+            }
+        </tr>
+        </thead>
+        <tbody>
+        @foreach (var row in Table.Rows)
+        {
+            <tr>
+                @foreach (var column in Columns)
+                {
+                    <td class="@AlignClass(column)" style="@CellStyle(column)">@ValueFormatter.Format(row.GetValueOrDefault(column.Field), column.Format)</td>
+                }
+            </tr>
+        }
+        </tbody>
+        @if (HasAggregates)
+        {
+            <tfoot>
+            <tr>
+                @foreach (var column in Columns)
+                {
+                    <td class="@AlignClass(column)" style="@CellStyle(column, header: true)">@AggregateText(column)</td>
+                }
+            </tr>
+            </tfoot>
+        }
+    </table>
+}
+</div>
+
+@code {
+    [Parameter, EditorRequired] public required TableElement Element { get; set; }
+    [CascadingParameter] public required ResolvedReport Resolved { get; set; }
+
+    private ResolvedData Data => Resolved.GetData(Element);
+    private ReportDataTable? Table => Data.Table;
+
+    private IReadOnlyList<ColumnDefinition> Columns =>
+        Element.Columns.Count > 0
+            ? Element.Columns
+            : Table!.Columns.Select(c => new ColumnDefinition { Field = c }).ToList();
+
+    private bool HasAggregates => Columns.Any(c => c.Aggregate != ColumnAggregate.None);
+
+    private string HeaderText(ColumnDefinition column) => column.Header ?? column.Field;
+
+    private string CellStyle(ColumnDefinition column, bool header = false) =>
+        $"border:1px solid #808080;padding:4px 8px;text-align:{Alignment(column)}{(header ? ";font-weight:600" : string.Empty)}";
+
+    private string Alignment(ColumnDefinition column) => column.Align switch
+    {
+        ColumnAlignment.Left => "left",
+        ColumnAlignment.Center => "center",
+        ColumnAlignment.Right => "right",
+        _ => IsNumericColumn(column.Field) ? "right" : "left",
+    };
+
+    private string AlignClass(ColumnDefinition column) => column.Align switch
+    {
+        ColumnAlignment.Left => "pr-left",
+        ColumnAlignment.Center => "pr-center",
+        ColumnAlignment.Right => "pr-right",
+        _ => IsNumericColumn(column.Field) ? "pr-right" : "pr-left",
+    };
+
+    private bool IsNumericColumn(string field) =>
+        Table!.Rows.Select(r => r.GetValueOrDefault(field)).FirstOrDefault(v => v is not null) is { } sample
+        && ValueFormatter.IsNumeric(sample);
+
+    private string AggregateText(ColumnDefinition column)
+    {
+        if (column.Aggregate == ColumnAggregate.None || Table is null)
+            return string.Empty;
+
+        var values = Table.Rows
+            .Select(r => r.GetValueOrDefault(column.Field))
+            .Where(v => v is not null)
+            .ToList();
+
+        if (column.Aggregate == ColumnAggregate.Count)
+            return values.Count.ToString("#,0");
+
+        var numbers = values.Where(ValueFormatter.IsNumeric).Select(ValueFormatter.ToDouble).ToList();
+        if (numbers.Count == 0)
+            return string.Empty;
+
+        var result = column.Aggregate switch
+        {
+            ColumnAggregate.Sum => numbers.Sum(),
+            ColumnAggregate.Average => numbers.Average(),
+            ColumnAggregate.Min => numbers.Min(),
+            ColumnAggregate.Max => numbers.Max(),
+            _ => 0,
+        };
+        return ValueFormatter.Format(result, column.Format ?? "#,0.##");
+    }
+}

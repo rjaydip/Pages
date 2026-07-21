@@ -1,0 +1,58 @@
+@page "/reports/{Id:int}"
+@rendermode InteractiveServer
+@using global::Pages.Reporting.Core.Serialization
+@inject ReportRepository Reports
+@inject NavigationManager Nav
+@inject ReportJson ReportJson
+
+<PageTitle>@(_report?.Name ?? "Report") — Pages.Reporting demo</PageTitle>
+
+@if (_report is null)
+{
+    <p>Report not found.</p>
+}
+else
+{
+    <div class="demo-toolbar">
+        <a class="demo-button" href="/">← All reports</a>
+        <span class="spacer"></span>
+        <a class="demo-button" href="/reports/@Id/designer">Open in designer</a>
+        <a class="demo-button" href="/reports/@Id/builder">Open in builder</a>
+        <a class="demo-button" href="/reports/@Id/edit">Edit JSON</a>
+        <a class="demo-button primary" href="/api/reports/@Id/pdf@(_query)" target="_blank">Download PDF</a>
+        <a class="demo-button primary" href="/api/reports/@Id/xlsx@(_query)" target="_blank">Download Excel</a>
+    </div>
+
+    <div class="demo-paper-stage">
+        @* PageSheet sizes the sheet from the report's own page settings — the same CSS
+           the designer canvas/preview uses, so all on-screen surfaces match the PDF. *@
+        <div class="demo-paper" style="@_sheetCss">
+            @* Query-string values become report parameter overrides, e.g. ?minRevenue=5000 *@
+            <ReportView Report="_definition" Parameters="_parameters" />
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private StoredReport? _report;
+    private global::Pages.Reporting.Core.Model.Report? _definition;
+    private string _sheetCss = string.Empty;
+    private Dictionary<string, string?>? _parameters;
+    private string _query = string.Empty;
+
+    protected override void OnParametersSet()
+    {
+        _report = Reports.Get(Id);
+        _definition = _report is null ? null : ReportJson.Deserialize(_report.Json);
+        _sheetCss = _definition is null ? string.Empty : PageSheet.Css(_definition.Page);
+
+        var uri = new Uri(Nav.Uri);
+        _query = uri.Query;
+        _parameters = string.IsNullOrEmpty(uri.Query)
+            ? null
+            : Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query)
+                .ToDictionary(kv => kv.Key, kv => (string?)kv.Value.ToString());
+    }
+}

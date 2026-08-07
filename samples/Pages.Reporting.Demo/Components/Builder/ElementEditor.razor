@@ -1,28 +1,16 @@
 @switch (Element)
 {
-    case TitleElement title:
+    case TextElement text:
         <div class="b-grid">
-            <label class="b-field"><span>Text</span><input @bind="title.Text" /></label>
-            <label class="b-field"><span>Subtitle</span><input @bind="title.Subtitle" /></label>
+            <label class="b-field">
+                <span>Content <small>(mixes literal text with data tokens: {dataSet.Column}, {dataSet.Column:sum:C0}, {@@paramName})</small></span>
+                <textarea rows="3" @bind="text.Content"></textarea>
+            </label>
+            <label class="b-field b-check">
+                <input type="checkbox" @bind="text.RenderHtml" />
+                <span>Render as HTML (only for trusted content)</span>
+            </label>
         </div>
-        break;
-
-    case ValueElement value:
-        <div class="b-grid">
-            <label class="b-field"><span>Label</span><input @bind="value.Label" /></label>
-            <label class="b-field"><span>Format (e.g. N2, C0)</span><input @bind="value.Format" /></label>
-        </div>
-        <BindingEditor Binding="value.Binding" Report="Report" Scalar="true" />
-        break;
-
-    case KpiCardElement kpi:
-        <div class="b-grid">
-            <label class="b-field"><span>Label</span><input @bind="kpi.Label" /></label>
-            <label class="b-field"><span>Format</span><input @bind="kpi.Format" /></label>
-            <label class="b-field"><span>Caption</span><input @bind="kpi.Caption" /></label>
-            <label class="b-field"><span>Accent color</span><input @bind="kpi.Accent" placeholder="#2a78d6" /></label>
-        </div>
-        <BindingEditor Binding="kpi.Binding" Report="Report" Scalar="true" />
         break;
 
     case ChartElement chart:

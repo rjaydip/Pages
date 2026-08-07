@@ -55,6 +55,15 @@ public sealed class ReportRepository(string dbPath)
         command.ExecuteNonQuery();
     }
 
+    public void Delete(int id)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM Reports WHERE Id = @id";
+        command.Parameters.AddWithValue("@id", id);
+        command.ExecuteNonQuery();
+    }
+
     private SqliteConnection Open()
     {
         var connection = new SqliteConnection(_connectionString);

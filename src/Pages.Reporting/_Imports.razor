@@ -1,0 +1,14 @@
+@* Union of what the Blazor and Designer components each imported when they were separate
+   assemblies. The `global::` prefix is load-bearing on the Pages.Reporting.* lines: this
+   project's root namespace is Pages.Reporting, so an unqualified `Pages.Reporting.Core.Model`
+   would first be resolved relative to the current namespace and miss. *@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@using global::Pages.Reporting.Core.Charts
+@using global::Pages.Reporting.Core.Data
+@using global::Pages.Reporting.Core.Model
+@using global::Pages.Reporting.Core.Rendering
+@using global::Pages.Reporting.Blazor
+@using global::Pages.Reporting.Blazor.Components
+@using global::Pages.Reporting.Designer.Internal

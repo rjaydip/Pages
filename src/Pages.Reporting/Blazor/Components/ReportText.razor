@@ -1,0 +1,40 @@
+@* Resolved template text ({dataSet.Column:agg:fmt} placeholders already replaced by the
+   resolver). Plain mode keeps the author's line breaks (pre-wrap); HTML mode renders the
+   author's own tags and leaves whitespace handling to them. Page-number tokens arrive as
+   placeholder characters the resolver couldn't fill (see PageTokens) — only Chromium's
+   print template can, and there they become markup, so that case takes the escaped path. *@
+@if (Element.RenderHtml)
+{
+    <div class="pr-text @Element.CssClass"
+         style="@StyleCss.Concat("margin:0;", StyleCss.Inline(Element.Style))">@((MarkupString)PageTokens.Resolve(Raw, TokenMode))</div>
+}
+else if (TokenMode == PageTokenMode.PdfTemplate && PageTokens.Contains(Raw))
+{
+    <div class="pr-text @Element.CssClass"
+         style="@StyleCss.Concat("margin:0;white-space:pre-wrap;", StyleCss.Inline(Element.Style))">@((MarkupString)PageTokens.Resolve(System.Net.WebUtility.HtmlEncode(Raw), TokenMode))</div>
+}
+else
+{
+    <div class="pr-text @Element.CssClass"
+         style="@StyleCss.Concat("margin:0;white-space:pre-wrap;", StyleCss.Inline(Element.Style))">@PageTokens.Resolve(Raw, TokenMode)</div>
+}
+
+@code {
+    [Parameter, EditorRequired] public required TextElement Element { get; set; }
+    [CascadingParameter] public required ResolvedReport Resolved { get; set; }
+
+    /// <summary>Screen unless rendering Chromium's print template; decides how page tokens read.</summary>
+    [CascadingParameter(Name = "PageTokenMode")] public PageTokenMode TokenMode { get; set; }
+
+    /// <summary>The group this element is rendering inside, or null outside any group.</summary>
+    [CascadingParameter(Name = "GroupScope")] public GroupScope? Scope { get; set; }
+
+    private ResolvedData Data => Resolved.GetData(Element);
+
+    // Outside a group the resolver already substituted every token. Inside one the same
+    // element renders once per group with different values, so the template is re-rendered
+    // here against that group's rows.
+    private string Raw => Scope is null
+        ? Data.Scalar?.ToString() ?? string.Empty
+        : ScopedValues.Render(Resolved, Scope, Element.Content);
+}

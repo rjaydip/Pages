@@ -1,0 +1,736 @@
+@namespace Pages.Reporting.Designer.Internal
+@using Pages.Reporting.Core.Security
+@inject ReportDataResolver Resolver
+@inject IReportCipher Cipher
+
+<aside class="rd-props">
+    @if (PageSelected)
+    {
+        <h3 class="rd-props-head">Page</h3>
+        <label class="rd-field">
+            <span>PDF page size</span>
+            <select @bind="Report.Page.Size" @bind:after="NotifyChanged">
+                <option>A4</option>
+                <option>A3</option>
+                <option>Letter</option>
+                <option>Legal</option>
+            </select>
+        </label>
+        <label class="rd-check">
+            <input type="checkbox" @bind="Report.Page.Landscape" @bind:after="NotifyChanged" />
+            <span>Landscape PDF</span>
+        </label>
+        <label class="rd-field"><span>PDF margin</span><input @bind="Report.Page.Margin" @bind:after="NotifyChanged" placeholder="15mm" /></label>
+        <label class="rd-check">
+            <input type="checkbox" @bind="Report.Page.ShowFooter" @bind:after="NotifyChanged" />
+            <span>PDF page-number strip (report name + page numbers, below any footer band)</span>
+        </label>
+        <label class="rd-field">
+            <span>Section spacing — "row column" (e.g. 12 16; 0 = boxes touch)</span>
+            <input @bind="Report.Spacing" @bind:after="NotifyChanged" placeholder="12 16" />
+        </label>
+        <p class="rd-hint">With spacing 0, avoid doubled lines by using per-side borders (e.g. the lower box skips its top border).</p>
+        <StyleEditor @bind-Style="Report.Style" @bind-Style:after="NotifyChanged" TextOptions="false" />
+    }
+    else if (Selection is ConnectionDefinition connection)
+    {
+        <h3 class="rd-props-head">Connection</h3>
+        <label class="rd-field"><span>Name (data sets reference this)</span><input @bind="connection.Name" @bind:after="NotifyChanged" /></label>
+        @if (_connectionLocked)
+        {
+            <div class="rd-locked">
+                🔒 Saved &amp; encrypted — the stored details keep working. Replace them to make changes.
+            </div>
+            <button type="button" class="rd-load" @onclick="() => ReplaceConnection(connection)">Replace connection details…</button>
+        }
+        else
+        {
+            <label class="rd-field">
+                <span>Provider</span>
+                <select @bind="connection.Provider" @bind:after="() => ConnectionFieldChanged(connection)">
+                    <option value="@DatabaseProvider.Sqlite">SQLite</option>
+                    <option value="@DatabaseProvider.SqlServer">SQL Server</option>
+                    <option value="@DatabaseProvider.PostgreSql">PostgreSQL</option>
+                    <option value="@DatabaseProvider.MySql">MySQL</option>
+                </select>
+            </label>
+            @if (connection.Provider == DatabaseProvider.Sqlite)
+            {
+                <label class="rd-field">
+                    <span>Database file</span>
+                    <input placeholder="reports.db" @bind="_connection.Server" @bind:after="() => ConnectionFieldChanged(connection)" />
+                </label>
+                <p class="rd-hint">Path to the SQLite file — relative to the application, or absolute.</p>
+            }
+            else
+            {
+                <label class="rd-field">
+                    <span>@(connection.Provider == DatabaseProvider.PostgreSql ? "Host" : "Server")</span>
+                    <input placeholder="localhost" @bind="_connection.Server" @bind:after="() => ConnectionFieldChanged(connection)" />
+                </label>
+                <label class="rd-field">
+                    <span>Port (blank = default)</span>
+                    <input placeholder="@DefaultPort(connection.Provider)" @bind="_connection.Port" @bind:after="() => ConnectionFieldChanged(connection)" />
+                </label>
+                <label class="rd-field">
+                    <span>Database</span>
+                    <input @bind="_connection.Database" @bind:after="() => ConnectionFieldChanged(connection)" />
+                </label>
+                @if (connection.Provider == DatabaseProvider.SqlServer)
+                {
+                    <label class="rd-check">
+                        <input type="checkbox" @bind="_connection.IntegratedSecurity" @bind:after="() => ConnectionFieldChanged(connection)" />
+                        Windows authentication (no user/password)
+                    </label>
+                }
+                @if (connection.Provider != DatabaseProvider.SqlServer || !_connection.IntegratedSecurity)
+                {
+                    <label class="rd-field">
+                        <span>Username</span>
+                        <input @bind="_connection.Username" @bind:after="() => ConnectionFieldChanged(connection)" />
+                    </label>
+                    <label class="rd-field">
+                        <span>Password</span>
+                        <div class="rd-password">
+                            <input type="@(_showPassword ? "text" : "password")" @bind="_connection.Password" @bind:after="() => ConnectionFieldChanged(connection)" />
+                            <button type="button" class="rd-reveal" @onclick="() => _showPassword = !_showPassword">
+                                @(_showPassword ? "Hide" : "Show")
+                            </button>
+                        </div>
+                    </label>
+                }
+                @if (connection.Provider == DatabaseProvider.SqlServer)
+                {
+                    <label class="rd-check">
+                        <input type="checkbox" @bind="_connection.TrustServerCertificate" @bind:after="() => ConnectionFieldChanged(connection)" />
+                        Trust server certificate
+                    </label>
+                    <p class="rd-hint">Keep on for local/dev servers without a trusted TLS certificate.</p>
+                }
+            }
+            <details class="rd-adv">
+                <summary>Connection string</summary>
+                <label class="rd-field">
+                    <textarea rows="3" spellcheck="false" @bind="connection.ConnectionString" @bind:after="() => ConnectionRawChanged(connection)"></textarea>
+                </label>
+                <p class="rd-hint">Built from the fields above; edit here for options the form doesn't cover.</p>
+            </details>
+        }
+        <button type="button" class="rd-load" disabled="@_testingConnection" @onclick="() => TestConnection(connection)">
+            @(_testingConnection ? "Testing…" : "Test connection")
+        </button>
+        @if (_connectionTest is { } test)
+        {
+            @if (test.Ok)
+            {
+                <p class="rd-ok">✓ Connection works.</p>
+            }
+            else
+            {
+                <p class="rd-error">@test.Message</p>
+            }
+        }
+        <p class="rd-hint">Encrypted when the report is saved (<code>enc:v1:…</code>), so the JSON is safe to store anywhere.</p>
+        <button type="button" class="rd-remove" @onclick="() => OnRemoveItem.InvokeAsync(connection)">Remove connection</button>
+    }
+    else if (Selection is DataSetDefinition dataSet)
+    {
+        <h3 class="rd-props-head">Data set</h3>
+        <label class="rd-field"><span>Name (components reference this)</span><input @bind="dataSet.Name" @bind:after="NotifyChanged" /></label>
+        @if (dataSet.Binding is SqlBinding dataSetSql)
+        {
+            <label class="rd-field">
+                <span>Connection</span>
+                <select @bind="dataSetSql.Connection" @bind:after="NotifyChanged">
+                    @if (Report.Connections.Count == 0)
+                    {
+                        <option value="">— add a connection first —</option>
+                    }
+                    @foreach (var candidate in Report.Connections)
+                    {
+                        <option value="@candidate.Name">@candidate.Name (@candidate.Provider)</option>
+                    }
+                </select>
+            </label>
+            <label class="rd-field">
+                <span>SQL (use @@paramName for parameters)</span>
+                <textarea rows="6" @bind="dataSetSql.Sql" spellcheck="false"></textarea>
+            </label>
+            <button type="button" class="rd-load" disabled="@_loading" @onclick="() => LoadColumns(dataSet.Binding)">
+                @(_loading ? "Loading…" : "Load columns")
+            </button>
+            @if (_columns is { Count: > 0 })
+            {
+                <div class="rd-chips">
+                    @foreach (var column in _columns)
+                    {
+                        <span class="rd-chip">@column</span>
+                    }
+                </div>
+            }
+            @if (_columnsError is not null)
+            {
+                <p class="rd-error">@_columnsError</p>
+            }
+        }
+        else
+        {
+            <p class="rd-hint">Static rows (inline binding) — edit them in the JSON.</p>
+        }
+        <p class="rd-hint">Runs once per report generation; every component that picks this data set shares the result.</p>
+        <button type="button" class="rd-remove" @onclick="() => OnRemoveItem.InvokeAsync(dataSet)">Remove data set</button>
+    }
+    else if (Selection is ParameterDefinition reportParameter)
+    {
+        <h3 class="rd-props-head">Parameter</h3>
+        <label class="rd-field"><span>Name</span><input @bind="reportParameter.Name" @bind:after="NotifyChanged" /></label>
+        <label class="rd-field"><span>Default value</span><input @bind="reportParameter.DefaultValue" /></label>
+        <p class="rd-hint">
+            Use it in data set SQL as <code>@("@" + (string.IsNullOrWhiteSpace(reportParameter.Name) ? "name" : reportParameter.Name))</code>.
+            The host app supplies runtime values at view/export time (e.g. from the page URL);
+            the default applies when none is given.
+        </p>
+        <button type="button" class="rd-remove" @onclick="() => OnRemoveItem.InvokeAsync(reportParameter)">Remove parameter</button>
+    }
+    else if (Selection is BandSelection selectedBand)
+    {
+        var band = selectedBand.Band;
+        <h3 class="rd-props-head">@BandLabels.Label(band.Type) band</h3>
+        <label class="rd-field"><span>Name (designer label only)</span><input @bind="band.Name" @bind:after="NotifyChanged" /></label>
+        <label class="rd-field">
+            <span>Band type</span>
+            <select value="@band.Type" @onchange="e => ChangeBandType(band, e)">
+                @foreach (var type in BandLabels.Addable)
+                {
+                    <option value="@type" disabled="@(type == BandType.Table && !BandTypes.CanHoldTable(band))">@BandLabels.Label(type)</option>
+                }
+            </select>
+        </label>
+        @if (band.Type is BandType.GroupHeader or BandType.GroupFooter)
+        {
+            <label class="rd-field">
+                <span>Level (1 = outermost; a footer pairs with the header of the same level)</span>
+                <input type="number" step="1" min="1" @bind="band.Level" @bind:after="NotifyChanged" />
+            </label>
+        }
+        @if (band.Type == BandType.GroupHeader)
+        {
+            <label class="rd-field">
+                <span>Group by data set</span>
+                <select value="@(band.Group?.DataSet ?? string.Empty)" @onchange="e => ChangeGroupDataSet(band, e)">
+                    <option value="">(choose a data set)</option>
+                    @foreach (var candidate in Report.DataSets)
+                    {
+                        <option value="@candidate.Name">@candidate.Name</option>
+                    }
+                </select>
+            </label>
+            <label class="rd-field">
+                <span>Group by field</span>
+                <input value="@(band.Group?.Field ?? string.Empty)" placeholder="Region"
+                       disabled="@(band.Group is null)"
+                       @onchange="e => ChangeGroupField(band, e)" />
+            </label>
+            <p class="rd-hint">
+                Rows are grouped in the data set's own order — use ORDER BY in the query to
+                control which group comes first. Write <code>{group.@(band.Group?.Field ?? "Field")}</code>
+                in a text component to print the current value. Charts always show the whole
+                data set regardless of grouping; a per-group figure comes from a text component
+                using <code>{dataSet.Column:sum}</code>.
+            </p>
+        }
+        @if (band.Type != BandType.Table && !BandTypes.CanHoldTable(band))
+        {
+            <p class="rd-hint">
+                Can't switch to Table: a table band holds only one table, so this band's
+                existing components must be removed first.
+            </p>
+        }
+        @if (band.Type != BandType.Table)
+        {
+            <label class="rd-field">
+                <span>Height (mm — the box you position content in)</span>
+                <input type="number" step="0.5" min="@BandTypes.MinBandHeightMm.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                       @bind="band.HeightMm" @bind:after="() => CommitBandHeight(band)" />
+            </label>
+        }
+        @if (BandTypes.IsMargin(band.Type))
+        {
+            <p class="rd-hint">
+                A page header/footer prints inside the page margin, which must be sized before
+                pagination — content taller than this is clipped. Every page loses this much
+                room for the report body.
+            </p>
+        }
+        else if (band.Type == BandType.Table)
+        {
+            <p class="rd-hint">
+                A table band holds one table and grows to fit its rows — it has no fixed
+                height and never clips.
+            </p>
+        }
+        else
+        {
+            <p class="rd-hint">
+                @(band.Type == BandType.ReportSummary
+                    ? "Sized to this height, pinned to the bottom of the last page."
+                    : "Sized to this height; content taller than it is clipped.")
+                Page-number tokens don't work here — only page header/footer bands know their page.
+            </p>
+        }
+        <p class="rd-hint">
+            Built-in text tokens: <code>{page}</code>, <code>{pages}</code>,
+            <code>{reportName}</code>, <code>{now:d}</code>. Drag components onto the band
+            like any other part of the page.
+        </p>
+        <StyleEditor @bind-Style="band.Style" @bind-Style:after="NotifyChanged" TextOptions="false" />
+        <button type="button" class="rd-remove" @onclick="() => OnRemoveItem.InvokeAsync(selectedBand)">Remove band</button>
+    }
+    else if (Element is null)
+    {
+        <p class="rd-hint">Select a component on the canvas — or a connection, data set, or parameter in the Data tab — to configure it.</p>
+    }
+    else
+    {
+        <h3 class="rd-props-head">@ElementNames.TypeName(Element)</h3>
+        <span class="rd-group-head">Content</span>
+
+        @switch (Element)
+        {
+            case TextElement text:
+                <label class="rd-field">
+                    <span>Content</span>
+                    <textarea rows="4" @bind="text.Content" @bind:after="NotifyChanged" spellcheck="false"></textarea>
+                </label>
+                <label class="rd-check">
+                    <input type="checkbox" @bind="text.RenderHtml" @bind:after="NotifyChanged" />
+                    <span>Render as HTML (your tags like &lt;b&gt;, &lt;span style="…"&gt; take effect)</span>
+                </label>
+                <p class="rd-hint">
+                    Mix text with data: <code>{sales.Revenue:sum:C0}</code> — aggregate
+                    (first/sum/avg/count/min/max) and format are optional. <code>{@("@")param}</code>
+                    inserts a parameter; <code>{{</code> writes a literal brace.
+                    @if (Report.DataSets.Count > 0)
+                    {
+                        <span>Data sets: @string.Join(", ", Report.DataSets.Select(d => d.Name)).</span>
+                    }
+                </p>
+                break;
+
+            case TableElement table:
+                <label class="rd-field"><span>Title</span><input @bind="table.Title" @bind:after="NotifyChanged" /></label>
+                @RenderBinding(table.Binding, b => table.Binding = b)
+                @if (_columns is not null)
+                {
+                    <span class="rd-subhead">Columns to include</span>
+                    @foreach (var column in _columns)
+                    {
+                        <label class="rd-check">
+                            <input type="checkbox" checked="@HasColumn(table, column)"
+                                   @onchange="e => ToggleColumn(table, column, (bool)e.Value!)" />
+                            <span>@column</span>
+                        </label>
+                    }
+                }
+                @if (table.Columns.Count > 0)
+                {
+                    <span class="rd-subhead">Column settings</span>
+                    @foreach (var column in table.Columns)
+                    {
+                        <div class="rd-col-row" @key="column">
+                            <span class="rd-col-name" title="@column.Field">@column.Field</span>
+                            <input placeholder="Header" @bind="column.Header" @bind:after="NotifyChanged" />
+                            <input placeholder="Format" @bind="column.Format" />
+                            <select @bind="column.Align" @bind:after="NotifyChanged" title="Alignment">
+                                <option value="@ColumnAlignment.Auto">Auto</option>
+                                <option value="@ColumnAlignment.Left">Left</option>
+                                <option value="@ColumnAlignment.Center">Center</option>
+                                <option value="@ColumnAlignment.Right">Right</option>
+                            </select>
+                            <select @bind="column.Aggregate" @bind:after="NotifyChanged" title="Total row">
+                                <option value="@ColumnAggregate.None">No total</option>
+                                <option value="@ColumnAggregate.Sum">Sum</option>
+                                <option value="@ColumnAggregate.Average">Average</option>
+                                <option value="@ColumnAggregate.Count">Count</option>
+                                <option value="@ColumnAggregate.Min">Min</option>
+                                <option value="@ColumnAggregate.Max">Max</option>
+                            </select>
+                            <button type="button" class="rd-x" title="Remove"
+                                    @onclick="async () => { table.Columns.Remove(column); await NotifyChanged(); }">✕</button>
+                        </div>
+                    }
+                    <p class="rd-hint">No columns selected = show every column the query returns.</p>
+                }
+                break;
+
+            case ChartElement chart:
+                <label class="rd-field"><span>Title</span><input @bind="chart.Title" @bind:after="NotifyChanged" /></label>
+                <label class="rd-field">
+                    <span>Chart type</span>
+                    <select @bind="chart.ChartType" @bind:after="NotifyChanged">
+                        <option value="@ChartType.Bar">Bar</option>
+                        <option value="@ChartType.Line">Line</option>
+                        <option value="@ChartType.Pie">Pie</option>
+                    </select>
+                </label>
+                <label class="rd-field"><span>Height (px)</span><input type="number" @bind="chart.Height" @bind:after="NotifyChanged" /></label>
+                <label class="rd-field"><span>Value format</span><input @bind="chart.Format" placeholder="#,0" /></label>
+                @RenderBinding(chart.Binding, b => chart.Binding = b)
+                @if (_columns is not null)
+                {
+                    <span class="rd-subhead">Label field (categories)</span>
+                    @foreach (var column in _columns)
+                    {
+                        <label class="rd-check">
+                            <input type="radio" name="rd-labelfield" checked="@(chart.LabelField == column)"
+                                   @onchange="async () => { chart.LabelField = column; await NotifyChanged(); }" />
+                            <span>@column</span>
+                        </label>
+                    }
+                    <span class="rd-subhead">Value fields (series)</span>
+                    @foreach (var column in _columns)
+                    {
+                        <label class="rd-check">
+                            <input type="checkbox" checked="@chart.ValueFields.Contains(column)"
+                                   @onchange="e => ToggleValueField(chart, column, (bool)e.Value!)" />
+                            <span>@column</span>
+                        </label>
+                    }
+                }
+                else
+                {
+                    <label class="rd-field"><span>Label field</span><input @bind="chart.LabelField" /></label>
+                    <label class="rd-field"><span>Value fields (comma-separated)</span><input @bind="ChartValueFieldsText" /></label>
+                }
+                break;
+
+            case SectionElement section:
+                <label class="rd-field"><span>Title</span><input @bind="section.Title" @bind:after="NotifyChanged" /></label>
+                <label class="rd-field">
+                    <span>Layout</span>
+                    <select value="@SectionLayout(section)" @onchange="e => SetSectionLayout(section, (string?)e.Value)">
+                        <option value="column">Stacked (column)</option>
+                        <option value="row">Side by side (row)</option>
+                        <option value="custom">Custom grid…</option>
+                    </select>
+                </label>
+                @if (section.Columns is not null)
+                {
+                    <label class="rd-field">
+                        <span>Children per row (columns)</span>
+                        <input type="number" min="1" max="12" @bind="section.Columns" @bind:after="NotifyChanged" />
+                    </label>
+                    <p class="rd-hint">Children wrap automatically — rows come from children ÷ columns.</p>
+                }
+                break;
+        }
+
+        @* Every selectable element is a direct band member (free-positioned) — a section's
+           children aren't reachable from the canvas yet, so there is no grid-layout element
+           to show Width/Height/Rows fields for.
+
+           The heading is inside the condition, not above it: a Table band's one TableElement
+           has no drag handles or grip on the canvas — its rectangle is ignored, since the
+           table sizes itself from its rows — so the hint is the whole of this group's content,
+           and hoisting the heading out left "Position" standing over nothing. *@
+        @if (!SelectionIsInTableBand)
+        {
+            <span class="rd-group-head">Position</span>
+            <p class="rd-hint">Drag the box on the canvas to move it, or its handles to resize. Position is saved automatically.</p>
+        }
+
+        @* Built-in styling is offered for the Text component only (for now). *@
+        @if (Element is TextElement)
+        {
+            <StyleEditor @bind-Style="Element.Style" @bind-Style:after="NotifyChanged" PaddingOption="false" />
+        }
+
+        <span class="rd-group-head">Advanced</span>
+        <label class="rd-field">
+            <span>CSS class (your stylesheet's hook for this component)</span>
+            <input @bind="Element.CssClass" placeholder="e.g. revenue-table" />
+        </label>
+        <button type="button" class="rd-remove" @onclick="() => OnRemoveItem.InvokeAsync(Element)">Remove component</button>
+    }
+</aside>
+
+@code {
+    /// <summary>What's being edited: a ReportElement, PageSelection, ConnectionDefinition, DataSetDefinition, or ParameterDefinition.</summary>
+    [Parameter] public object? Selection { get; set; }
+    [Parameter, EditorRequired] public required Report Report { get; set; }
+
+    /// <summary>Raised after any edit here so the host re-renders the live canvas/sheet.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    /// <summary>Raised when a Remove button is clicked; the host owns the lists and the selection.</summary>
+    [Parameter] public EventCallback<object> OnRemoveItem { get; set; }
+
+    private Task NotifyChanged() => OnChanged.InvokeAsync();
+
+    // step/min on a bare <input type="number"> are advisory — they style the field but do not
+    // stop the value binding, so a typed 12.34 or 1 would reach the model while the drag path
+    // clamps. Normalising here is what makes MinBandHeightMm's "the two cannot disagree" true.
+    private void CommitBandHeight(PageBand band)
+    {
+        band.HeightMm = Math.Max(Math.Round(band.HeightMm * 2) / 2, BandTypes.MinBandHeightMm);
+        NotifyChanged();
+    }
+
+    private void ChangeBandType(PageBand band, ChangeEventArgs e)
+    {
+        if (!Enum.TryParse<BandType>(e.Value?.ToString(), out var type))
+            return;
+        // Mirrors the disabled state on the <option> above so the two can't drift: a Table band
+        // holds exactly one TableElement, so switching in existing non-table content would strand
+        // it — invisible on the canvas, in the PDF, and in Excel, yet still resolved every run.
+        if (type == BandType.Table && !BandTypes.CanHoldTable(band))
+            return;
+        // Group state belongs to a group band. Leaving it on a converted band would write a
+        // "group" into the saved JSON for a band type whose contract says it has none —
+        // inert today, but a trap for anything that later trusts PageBand.Group's doc.
+        if (band.Type is BandType.GroupHeader or BandType.GroupFooter
+            && type is not (BandType.GroupHeader or BandType.GroupFooter))
+        {
+            band.Group = null;
+            band.Level = 1;
+        }
+        band.Type = type;
+        NotifyChanged();
+    }
+
+    // Group is null until a data set is chosen, so both setters materialise it. Field defaults
+    // to empty rather than null: GroupBinding requires both, and a half-filled binding is what
+    // the warning banner reports.
+    private void ChangeGroupDataSet(PageBand band, ChangeEventArgs e)
+    {
+        var dataSet = e.Value?.ToString() ?? string.Empty;
+        if (string.IsNullOrEmpty(dataSet))
+            band.Group = null;
+        else
+            band.Group = new GroupBinding { DataSet = dataSet, Field = band.Group?.Field ?? string.Empty };
+        NotifyChanged();
+    }
+
+    private void ChangeGroupField(PageBand band, ChangeEventArgs e)
+    {
+        if (band.Group is null)
+            return; // choose the data set first — there is nothing to hang the field on
+        band.Group.Field = e.Value?.ToString() ?? string.Empty;
+        NotifyChanged();
+    }
+
+    private ReportElement? Element => Selection as ReportElement;
+    private bool PageSelected => Selection is PageSelection;
+
+    // A Table band's one TableElement has no drag handles or grip on the SVG canvas — its
+    // rectangle is ignored (the table's real size comes from its rows) — so the "drag/resize"
+    // hint would be wrong for it.
+    private bool SelectionIsInTableBand =>
+        Element is not null && Report.Bands.Any(b => b.Type == BandType.Table && b.Elements.Contains(Element));
+
+    private object? _last;
+    private IReadOnlyList<string>? _columns;
+    private string? _columnsError;
+    private bool _loading;
+
+    private ConnectionFields _connection = new();
+    private bool _connectionLocked;
+    private bool _showPassword;
+    private bool _testingConnection;
+    private (bool Ok, string? Message)? _connectionTest;
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(Selection, _last))
+            return;
+        _last = Selection;
+        _columns = null;
+        _columnsError = null;
+        _loading = false;
+        _connectionTest = null;
+        _testingConnection = false;
+        _showPassword = false;
+        if (Selection is ConnectionDefinition connection)
+        {
+            _connectionLocked = Cipher.IsEncrypted(connection.ConnectionString);
+            _connection = _connectionLocked ? new() : ConnectionFields.Parse(connection.Provider, connection.ConnectionString);
+        }
+    }
+
+    private static string DefaultPort(DatabaseProvider provider) => provider switch
+    {
+        DatabaseProvider.SqlServer => "1433",
+        DatabaseProvider.PostgreSql => "5432",
+        DatabaseProvider.MySql => "3306",
+        _ => string.Empty,
+    };
+
+    /// <summary>A form field changed: rebuild the connection string from the fields.</summary>
+    private async Task ConnectionFieldChanged(ConnectionDefinition connection)
+    {
+        connection.ConnectionString = _connection.Build(connection.Provider);
+        _connectionTest = null;
+        await NotifyChanged();
+    }
+
+    /// <summary>The raw string was edited directly: re-parse it into the form fields.</summary>
+    private async Task ConnectionRawChanged(ConnectionDefinition connection)
+    {
+        _connection = ConnectionFields.Parse(connection.Provider, connection.ConnectionString);
+        _connectionTest = null;
+        await NotifyChanged();
+    }
+
+    private void ReplaceConnection(ConnectionDefinition connection)
+    {
+        connection.ConnectionString = string.Empty;
+        _connection = new();
+        _connectionLocked = false;
+        _connectionTest = null;
+    }
+
+    private async Task TestConnection(ConnectionDefinition connection)
+    {
+        _testingConnection = true;
+        _connectionTest = null;
+        var error = await Resolver.TestConnectionAsync(connection);
+        _testingConnection = false;
+        _connectionTest = (error is null, error);
+    }
+
+    private RenderFragment RenderBinding(DataBinding binding, Action<DataBinding> replace) => __builder =>
+    {
+        <span class="rd-group-head">Data</span>
+
+        @if (binding is not DataSetBinding dataSet)
+        {
+            <p class="rd-hint">This component uses a legacy embedded query. Pick a data set to replace it.</p>
+            <label class="rd-field">
+                <span>Data set</span>
+                <select value="" @onchange="e => ReplaceBinding(replace, (string?)e.Value)">
+                    <option value="">— keep legacy query —</option>
+                    @foreach (var candidate in Report.DataSets)
+                    {
+                        <option value="@candidate.Name">@candidate.Name</option>
+                    }
+                </select>
+            </label>
+            return;
+        }
+
+        <label class="rd-field">
+            <span>Data set</span>
+            <select @bind="dataSet.Name" @bind:after="() => DataSetChanged(dataSet)">
+                @if (Report.DataSets.Count == 0)
+                {
+                    <option value="">— add a data set first —</option>
+                }
+                @foreach (var candidate in Report.DataSets)
+                {
+                    <option value="@candidate.Name">@candidate.Name</option>
+                }
+            </select>
+        </label>
+
+        <button type="button" class="rd-load" disabled="@_loading" @onclick="() => LoadColumns(dataSet)">
+            @(_loading ? "Loading…" : "Load columns")
+        </button>
+        @if (_columnsError is not null)
+        {
+            <p class="rd-error">@_columnsError</p>
+        }
+    };
+
+    private async Task ReplaceBinding(Action<DataBinding> replace, string? name)
+    {
+        if (string.IsNullOrEmpty(name))
+            return;
+        var binding = new DataSetBinding { Name = name };
+        replace(binding);
+        await NotifyChanged();
+        await LoadColumns(binding);
+    }
+
+    private async Task DataSetChanged(DataSetBinding binding)
+    {
+        _columns = null;
+        _columnsError = null;
+        await NotifyChanged();
+        if (!string.IsNullOrEmpty(binding.Name))
+            await LoadColumns(binding);
+    }
+
+    private async Task LoadColumns(DataBinding binding)
+    {
+        _loading = true;
+        _columnsError = null;
+        var data = await Resolver.ResolveBindingAsync(Report, binding);
+        _loading = false;
+        if (data.Error is not null)
+        {
+            _columnsError = data.Error;
+            _columns = null;
+        }
+        else
+        {
+            _columns = data.Table?.Columns;
+        }
+    }
+
+    private static bool HasColumn(TableElement table, string field) =>
+        table.Columns.Any(c => string.Equals(c.Field, field, StringComparison.OrdinalIgnoreCase));
+
+    private async Task ToggleColumn(TableElement table, string field, bool include)
+    {
+        if (include && !HasColumn(table, field))
+            table.Columns.Add(new ColumnDefinition { Field = field });
+        else if (!include)
+            table.Columns.RemoveAll(c => string.Equals(c.Field, field, StringComparison.OrdinalIgnoreCase));
+        await NotifyChanged();
+    }
+
+    private async Task ToggleValueField(ChartElement chart, string field, bool include)
+    {
+        if (include && !chart.ValueFields.Contains(field))
+            chart.ValueFields.Add(field);
+        else if (!include)
+            chart.ValueFields.Remove(field);
+        await NotifyChanged();
+    }
+
+    private static string SectionLayout(SectionElement section) =>
+        section.Columns is not null ? "custom"
+        : section.Direction == SectionDirection.Row ? "row"
+        : "column";
+
+    private async Task SetSectionLayout(SectionElement section, string? mode)
+    {
+        switch (mode)
+        {
+            case "custom":
+                section.Columns ??= 2;
+                break;
+            case "row":
+                section.Columns = null;
+                section.Direction = SectionDirection.Row;
+                break;
+            default:
+                section.Columns = null;
+                section.Direction = SectionDirection.Column;
+                break;
+        }
+        await NotifyChanged();
+    }
+
+    private string ChartValueFieldsText
+    {
+        get => Element is ChartElement chart ? string.Join(", ", chart.ValueFields) : string.Empty;
+        set
+        {
+            if (Element is ChartElement chart)
+                chart.ValueFields = value
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToList();
+        }
+    }
+}

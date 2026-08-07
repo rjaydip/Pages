@@ -1,0 +1,277 @@
+@namespace Pages.Reporting.Designer.Internal
+@using global::Pages.Reporting.Blazor
+
+@* The sheet is one SVG whose user space IS the report's coordinate system: viewBox units are
+   millimetres, so every number below is the model's number written out verbatim — no conversion
+   in this file at all. Paper is defined in millimetres (A4 is exactly 210×297), which is what
+   lets the 4mm lattice divide the content area exactly instead of landing on fractions.
+   CAUTION: CSS lengths inside this SVG resolve to user units, so a font-size or dash pattern
+   written in "px" is millimetres here — see SvgSheet.razor.css.
+   Zoom is the element's rendered width against a fixed viewBox, so nothing is re-measured or
+   re-laid-out when it changes.
+   The sheet may hold more than one printed page's worth of bands, so its viewBox/width/height
+   are sized to whichever is taller — the page itself, or the stacked band content — instead of
+   clipping at one page (svg:not(:root) is overflow:hidden by default, unlike the document root). *@
+<svg class="rd-svgsheet" data-svg-sheet
+     viewBox="@Fmt(0) @Fmt(0) @Fmt(Width) @Fmt(Height)"
+     width="@Fmt(Width * 96 / 25.4 * Zoom)" height="@Fmt(Height * 96 / 25.4 * Zoom)"
+     data-margin-left-mm="@Fmt(MarginLeft)" data-margin-top-mm="@Fmt(MarginTop)"
+     data-step-mm="@Fmt(BandTypes.GridMinorMm)"
+     data-min-band-mm="@Fmt(BandTypes.MinBandHeightMm)"
+     data-content-width-mm="@Fmt(ContentWidth)">
+    <defs>
+        @* ONE tile, one major cell across, carrying both weights: the minor cross in the light
+           stroke and the major edges in the dark one.
+
+           This used to be two nested patterns — a minor pattern filling a major one. That gives
+           the renderer two tile geometries to rasterise, and each rounds its tile to whole
+           device pixels independently, so the inner tiling drifts against the outer one and
+           lays a light line just inside every dark line. With a single tile there is only one
+           geometry and nothing to drift against.
+
+           patternUnits="userSpaceOnUse" tiles from the user-space origin, so x/y anchor the
+           lattice to the content area rather than the page corner. *@
+        <pattern id="rd-grid" patternUnits="userSpaceOnUse"
+                 x="@Fmt(MarginLeft)" y="@Fmt(MarginTop)"
+                 width="@Fmt(Major)" height="@Fmt(Major)">
+            <path d="M @Fmt(Minor) 0 V @Fmt(Major) M 0 @Fmt(Minor) H @Fmt(Major)"
+                  class="rd-gridline rd-minor" />
+            <path d="M @Fmt(Major) 0 L 0 0 0 @Fmt(Major)" class="rd-gridline rd-major" />
+        </pattern>
+    </defs>
+
+    <rect class="rd-paper" x="0" y="0" width="@Fmt(Width)" height="@Fmt(Height)" />
+    @* Insertion marker for a band drag; the pointer session moves and reveals it. *@
+    <line class="rd-svgdrop" data-drop-indicator x1="0" y1="0" x2="0" y2="0" />
+    <rect class="rd-grid" x="@Fmt(MarginLeft)" y="@Fmt(MarginTop)"
+          width="@Fmt(ContentWidth)" height="@Fmt(Height - MarginTop - PageSheet.MarginsMm(Report.Page).Bottom)" />
+
+    <CascadingValue Value="_preview">
+    @foreach (var box in SheetGeometry.Bands(Report))
+    {
+        var selected = ReferenceEquals((Selection as BandSelection)?.Band, box.Band);
+        var isTable = box.Band.Type == BandType.Table;
+        <g class="rd-svgband @(selected ? "rd-selected" : null)" @key="box.Band"
+           transform="translate(@Fmt(MarginLeft), @Fmt(box.Y))"
+           data-band-index="@box.Index" data-band-y="@Fmt(box.Y)"
+           @ondragover:preventDefault @ondrop="() => OnDropInto.InvokeAsync(box.Band)">
+            @* Clips this band's elements exactly where PageBandView's overflow:hidden clips
+               them in HTML/PDF/Excel output — without it, an element that overruns its band
+               (e.g. after the band is shrunk with the grip) is drawn whole here and gives no
+               visual signal that it will be cut in the rendered report. *@
+            <clipPath id="rd-band-clip-@box.Index">
+                <rect x="0" y="0" width="@Fmt(ContentWidth)" height="@Fmt(box.Height)" />
+            </clipPath>
+            @* Also the palette's drop target. The drop handlers live on the band <g> above
+               (an ancestor of both this rect and every element <g>) rather than on this box —
+               HTML5 drag events fire on the topmost node under the pointer and only bubble to
+               ancestors, so putting them on a sibling of the elements left a band undroppable
+               wherever an element covered it. *@
+            <rect class="rd-svgband-box" x="0" y="0"
+                  width="@Fmt(ContentWidth)" height="@Fmt(box.Height)"
+                  @onclick="() => OnSelectBand.InvokeAsync(box.Band)" @onclick:stopPropagation />
+
+            <g clip-path="url(#rd-band-clip-@box.Index)">
+                @* The caller owns this JSON: box.Band.Elements (or an entry inside it) can be
+                   null even where the type isn't (see the consolidated note atop
+                   DesignPreview.Resolve). @i is this element's true position in
+                   box.Band.Elements and round-trips through data-el-index into
+                   ReportDesigner.razor's own band.Elements[elIndex] lookup, so a null entry is
+                   skipped with `continue` rather than filtered out — filtering would renumber
+                   every surviving element behind it and make a later drag write to the wrong
+                   element. *@
+                @for (var i = 0; i < (box.Band.Elements?.Count ?? 0); i++)
+                {
+                    var element = box.Band.Elements![i];
+                    if (element is null)
+                    {
+                        continue;
+                    }
+                    var rect = element.Position ?? Full(box);
+                    <g class="rd-svgel @(ReferenceEquals(element, Selection as ReportElement) ? "rd-selected" : null)"
+                       @key="element" data-el-index="@i"
+                       transform="translate(@Fmt(rect.X), @Fmt(rect.Y))"
+                       @onclick="() => OnSelectElement.InvokeAsync(element)" @onclick:stopPropagation>
+                        <rect class="rd-svgel-box" width="@Fmt(rect.Width)" height="@Fmt(rect.Height)" />
+                        <ElementPreview Element="element" WidthMm="rect.Width" HeightMm="rect.Height"
+                                        ReportStyle="Report.Style" BandStyle="box.Band.Style" />
+                        @* The preview names the element now. The label survives only where
+                           there is nothing to draw, so a blank text element or an empty
+                           section is still findable on the canvas. *@
+                        @if (DesignPreview.IsEmpty(element))
+                        {
+                            <g><text class="rd-svgel-text" x="1.4" y="4.2">@ElementNames.TypeName(element)</text></g>
+                        }
+                        @* A Table band's one TableElement has no stored rectangle that does anything
+                           (CommitPosition ignores it, mirroring how a Table band ignores height), so
+                           it gets no resize handles either — they would promise a drag that has no effect. *@
+                        @if (!isTable && ReferenceEquals(element, Selection as ReportElement))
+                        {
+                            @foreach (var handle in Handles)
+                            {
+                                <rect class="rd-svghandle" data-handle="@handle.Name"
+                                      x="@Fmt(handle.Fx * rect.Width - HandleMm / 2)"
+                                      y="@Fmt(handle.Fy * rect.Height - HandleMm / 2)"
+                                      width="@Fmt(HandleMm)" height="@Fmt(HandleMm)" />
+                            }
+                        }
+                    </g>
+                }
+            </g>
+            @if (!isTable)
+            {
+                @* Inset fully inside the band's bottom edge rather than centred on it. The report's
+                   own BandGapMm is 0, which made that edge shared with the next band's box — which
+                   paints later and hit-tests even though it's fill:transparent, so a straddling grip
+                   had its lower half occluded (and, since the grip only reveals on :hover, hovering
+                   that half hit the next band instead). SheetGeometry.DesignGapMm now separates the
+                   boxes on the canvas so nothing occludes it, but the inset stays: it costs nothing,
+                   still reads as the bottom-edge handle, and keeps the grip correct if that gap is
+                   ever taken back out. *@
+                <rect class="rd-svggrip" data-band-resize
+                      x="@Fmt(ContentWidth / 2 - HandleMm / 2)" y="@Fmt(box.Height - HandleMm)"
+                      width="@Fmt(HandleMm)" height="@Fmt(HandleMm)" />
+            }
+            @* The label is the band's drag grip and its identity. It overlays the band's own
+               top-left corner rather than sitting above the band, because a strip above would
+               be canvas-only height the printed report does not have — and that error compounds
+               down the stack. Fitted to its text so it covers as little of the band as possible.
+               Drawn last in the band group (after the elements and the resize grip) so it stays
+               on top and clickable however an author positions their own content. *@
+            @* Height is clamped to the band's own height: the caller owns the report JSON and
+               PageBand.HeightMm has no setter clamp, so a hand-authored band shorter than the
+               tab is a real possibility, not just a UI-path edge case — and the tab must never
+               draw outside the band it labels. *@
+            <rect class="rd-svgband-label" data-band-move x="0" y="0" rx="1"
+                  width="@Fmt(LabelWidth(box.Band))" height="@Fmt(Math.Min(LabelHeight, box.Height))"
+                  @onclick="() => OnSelectBand.InvokeAsync(box.Band)" @onclick:stopPropagation />
+            @* The rect above is clamped to fit a short band, but the text itself isn't and sits
+               outside the band's own clip-path — so on a caller-supplied band under ~3.5mm tall,
+               unclamped text would draw onto the neighbouring band. Simplest fix is to not draw
+               it: the rect still renders (clamped), so the band stays grabbable by its tab. *@
+            @if (box.Height >= LabelHeight)
+            {
+                @* Wrapped in a <g>: a bare <text> as the first tag after a Razor code block is
+                   parsed as Razor's own reserved "text" pseudo-element (for literal text
+                   output), which rejects attributes — RZ1023. The wrapper sidesteps that. *@
+                <g><text class="rd-svgband-labeltext" x="1" y="@Fmt(LabelHeight * 0.72)">@Label(box.Band)</text></g>
+            }
+        </g>
+    }
+    </CascadingValue>
+
+    @* Screen-only pagination guide, drawn on top of the bands: a line at every multiple of the
+       printable page height, measured from the first band's top — approximate, same framing as
+       PageSheet.BreakGuideCss, not pixel-exact against the PDF. The band stack itself now
+       matches the printed stack exactly (the label is an overlay, not a row — see
+       SheetGeometry.LabelHeightMm), but Chromium can still shift a break down further by moving
+       a whole unbreakable component onto the next page, which this guide cannot predict. The
+       canvas otherwise gives the author no page-fit signal at all once bands stack past one page. *@
+    @foreach (var y in PageBreaks)
+    {
+        <line class="rd-svgpagebreak" x1="@Fmt(MarginLeft)" y1="@Fmt(y)"
+              x2="@Fmt(MarginLeft + ContentWidth)" y2="@Fmt(y)" />
+    }
+</svg>
+
+@code {
+    [Parameter, EditorRequired] public required Report Report { get; set; }
+    [Parameter] public object? Selection { get; set; }
+    [Parameter] public double Zoom { get; set; } = 1;
+    [Parameter] public EventCallback<PageBand> OnSelectBand { get; set; }
+    [Parameter] public EventCallback<ReportElement> OnSelectElement { get; set; }
+    [Parameter] public EventCallback<PageBand> OnDropInto { get; set; }
+
+    // Rebuilt on every parameter set, and cascaded WITHOUT IsFixed: the author edits the
+    // report in place, and the canvas has to follow. Assigned before the first render —
+    // Blazor runs OnParametersSet ahead of BuildRenderTree.
+    private ResolvedReport _preview = null!;
+
+    protected override void OnParametersSet() => _preview = DesignPreview.Resolve(Report);
+
+    private double Width => PageSheet.SizeMm(Report.Page).Width;
+    private double PageHeight => PageSheet.SizeMm(Report.Page).Height;
+
+    // The stacked bands may run past one printed page; size the sheet to whichever is taller
+    // so nothing beyond the first page is silently clipped by the SVG's implicit overflow:hidden.
+    private double Height => Math.Max(PageHeight, SheetGeometry.ContentHeightMm(Report));
+
+    private double MarginLeft => PageSheet.MarginsMm(Report.Page).Left;
+    private double MarginTop => PageSheet.MarginsMm(Report.Page).Top;
+    private double MarginRight => PageSheet.MarginsMm(Report.Page).Right;
+    private double MarginBottom => PageSheet.MarginsMm(Report.Page).Bottom;
+    private double Major => BandTypes.GridMajorMm;
+    private double Minor => BandTypes.GridMinorMm;
+    private double ContentWidth => Width - MarginLeft - MarginRight;
+    private double LabelHeight => SheetGeometry.LabelHeightMm;
+
+    // Every multiple of the printable page height, starting from the first band's top, that
+    // falls before the sheet's bottom edge.
+    private IEnumerable<double> PageBreaks
+    {
+        get
+        {
+            var boxes = SheetGeometry.Bands(Report);
+            if (boxes.Count == 0)
+                yield break;
+            // Same reserve arithmetic as PageSheet.BreakGuideCss and the PDF exporter: margin
+            // bands print inside the page margin, so they cost every page their height, and the
+            // page-number strip reserves its own band at the bottom.
+            var printable = PageHeight - MarginTop - MarginBottom
+                - Report.Bands.Where(band => BandTypes.IsMargin(band.Type)).Sum(band => band.HeightMm)
+                - (Report.Page.ShowFooter ? PageSettings.FooterReserveMm : 0);
+            if (printable <= 0)
+                yield break;
+            // Stepped in PRINT space and mapped back, because that is where a page actually
+            // fills: the canvas spends SheetGeometry.DesignGapMm between every pair of bands,
+            // which the printed report does not, so a break drawn at a canvas multiple would
+            // creep a whole gap earlier per band and point at the wrong content by the bottom
+            // of a long report.
+            for (var printY = boxes[0].PrintY + printable; ; printY += printable)
+            {
+                var y = SheetGeometry.CanvasY(boxes, printY);
+                if (y >= Height)
+                    yield break;
+                yield return y;
+            }
+        }
+    }
+
+    private static string Label(PageBand band) =>
+        band.Type == BandType.Table
+            ? BandLabels.Label(band.Type)
+            : FormattableString.Invariant($"{BandLabels.Label(band.Type)} — {band.HeightMm:0.#}mm");
+
+    // Fitted rather than full-width: the tab overlays the band, so every millimetre of width is a
+    // millimetre of the author's canvas it hides. SVG text cannot be measured server-side, so this
+    // approximates the label font's advance at 2.5mm — measured at ~1.35-1.55mm per character, and
+    // rounded UP deliberately: a tab slightly wider than its text is invisible, whereas one too
+    // narrow spills white text onto the paper. Clamped so the tab can't overrun a narrow page or
+    // an absurdly tall stored band height — Label() never includes band.Name, so in practice the
+    // string this measures is short and the clamp rarely bites.
+    private double LabelWidth(PageBand band) =>
+        Math.Min(ContentWidth, 2 + Label(band).Length * 1.6);
+
+    // An element that has never been positioned fills its band, matching the renderer's
+    // full-bleed fallback — drawn explicitly here because SVG has no percentage box model.
+    private LayoutPosition Full(BandBox box) =>
+        new() { X = 0, Y = 0, Width = ContentWidth, Height = box.Height };
+
+    /// <summary>Handle size in millimetres (2.5mm ≈ 9.45px at 100% zoom), divided by zoom so
+    /// the on-screen (CSS pixel) size stays constant however far the sheet is zoomed — a handle
+    /// that shrank with the sheet at low zoom would be too small to grab exactly when the
+    /// content itself gets hardest to hit.</summary>
+    private double HandleMm => 2.5 / Zoom;
+
+    private static readonly (string Name, double Fx, double Fy)[] Handles =
+    [
+        ("nw", 0, 0), ("n", 0.5, 0), ("ne", 1, 0),
+        ("e", 1, 0.5), ("se", 1, 1), ("s", 0.5, 1),
+        ("sw", 0, 1), ("w", 0, 0.5),
+    ];
+
+    // SVG attributes must be invariant — a comma decimal separator would silently break the
+    // whole document on a locale like de-DE.
+    private static string Fmt(double value) =>
+        value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+}

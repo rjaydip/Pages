@@ -1,0 +1,49 @@
+<div class="pr-cell" style="@CellStyle">
+    @switch (Element)
+    {
+        case TextElement text:
+            <ReportText Element="text" />
+            break;
+        case TableElement table:
+            <ReportTable Element="table" />
+            break;
+        case ChartElement chart:
+            <ReportChart Element="chart" />
+            break;
+        case SectionElement section:
+            <ReportSection Element="section" />
+            break;
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public required ReportElement Element { get; set; }
+
+    /// <summary>Span used when the element has none — row sections split evenly.</summary>
+    [Parameter] public int DefaultSpan { get; set; } = 12;
+
+    // display:grid makes the single child stretch to fill the cell, so a component's
+    // border/background covers the whole spanned area (rowSpan/minHeight), not just its content.
+    //
+    // The three declarations after it are what make the author's rectangle authoritative, and
+    // all three are load-bearing — the box is the size you drew, and nothing else:
+    //   height:100%   — a band element's parent (.pr-band-el) is absolutely positioned with an
+    //                   explicit height, but a block child of an absolutely positioned box does
+    //                   NOT inherit it. Without this the cell shrank to its text, the grid
+    //                   stretched the component only to that shrunken height, and a bordered
+    //                   element drew a box the size of its glyphs instead of the size of the
+    //                   element — leaving visibly empty band below it. It also silently made
+    //                   ElementStyle.VerticalAlign a no-op: centring inside a box already
+    //                   shrink-wrapped to its content moves nothing.
+    //   min-height:0  — grid items default to min-height:auto, which lets content push the box
+    //                   TALLER than the declared height. Overridden below when the author sets
+    //                   MinHeight, which is a deliberate floor rather than content pressure.
+    //   overflow:hidden — content larger than the rectangle is cut at the element's own edge.
+    //                   The band clips too, but only at the band edge, so an element smaller
+    //                   than its band would otherwise paint its overflow outside its own border.
+    private string CellStyle =>
+        $"grid-column:span {Math.Clamp(Element.ColumnSpan ?? DefaultSpan, 1, 12)};min-width:0;display:grid"
+        + ";height:100%;min-height:0;overflow:hidden"
+        + (Element.RowSpan is > 1 and { } rows ? $";grid-row:span {Math.Clamp(rows, 1, 24)}" : string.Empty)
+        + (StyleCss.Length(Element.MinHeight) is { } height ? $";min-height:{height}" : string.Empty);
+}

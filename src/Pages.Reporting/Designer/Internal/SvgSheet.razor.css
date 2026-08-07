@@ -1,0 +1,101 @@
+.rd-svgsheet {
+    display: block;
+    margin: 0 auto;
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.12)) drop-shadow(0 8px 24px rgba(0, 0, 0, 0.08));
+}
+
+.rd-paper { fill: #fff; }
+.rd-grid { fill: url(#rd-grid); }
+
+/* non-scaling-stroke keeps a line one device pixel however far the sheet is zoomed.
+   Deliberately NOT shape-rendering:crispEdges — the minor lines are the closest-spaced, at a
+   fractional 7.56px, so snapping every line to a whole pixel makes the gaps alternate
+   8px/8px/7px and the lattice reads as irregular. Antialiasing keeps the rhythm even, at
+   the cost of a marginally softer line. */
+.rd-gridline {
+    fill: none;
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+}
+/* Two weights, far apart on purpose: the minor line is the lattice a drag snaps to, and the
+   major line is dark enough to sight along as the coarser reference grid. Close weights would
+   make the major line read as a second box drawn inside each cell instead of a distinct guide. */
+.rd-gridline.rd-minor { stroke: rgba(0, 0, 0, 0.10); }
+.rd-gridline.rd-major { stroke: rgba(0, 0, 0, 0.32); }
+
+.rd-svgband-box {
+    fill: transparent;
+    stroke: rgba(0, 0, 0, 0.18);
+    stroke-dasharray: 3 2;
+    vector-effect: non-scaling-stroke;
+}
+.rd-svgband.rd-selected .rd-svgband-box {
+    stroke: #4c7dfb;
+    stroke-dasharray: none;
+}
+/* A tab over the band's own corner, not a strip above it — so it is opaque enough to read
+   against whatever content sits under it, and rounded on the outer corner to read as chrome. */
+.rd-svgband-label {
+    fill: rgba(0, 0, 0, 0.55);
+    cursor: grab;
+}
+.rd-svgband-label:active { cursor: grabbing; }
+
+/* Hidden until a band drag is live, then drawn at the insertion point. */
+.rd-svgdrop {
+    stroke: #4c8bf5;
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+    opacity: 0;
+}
+.rd-svgdrop.rd-on { opacity: 1; }
+.rd-svgband-labeltext {
+    font: 2.5px system-ui, sans-serif;
+    fill: #fff;
+    pointer-events: none;
+}
+
+/* Distinct from the grid (faint) and the drop indicator (solid blue, drag-only) so a page-fit
+   signal reads as its own thing: where a printed PDF would start a new page. */
+.rd-svgpagebreak {
+    stroke: #d9822b;
+    stroke-width: 1;
+    stroke-dasharray: 6 3;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+}
+
+/* Transparent, not tinted: the element now paints its own content and background on top, and
+   a 3% wash under it only muddies the author's own colours. The stroke stays — it is the one
+   signal of an element's extent when the author gave it no border of its own. Not `fill:
+   none` — an unfilled SVG shape takes no pointer events, which would leave only the 1px
+   stroke selectable, and this rect is the element's sole hit target. */
+.rd-svgel-box {
+    fill: transparent;
+    stroke: rgba(0, 0, 0, 0.35);
+    vector-effect: non-scaling-stroke;
+}
+.rd-svgel.rd-selected .rd-svgel-box {
+    stroke: #4c8bf5;
+    stroke-width: 2;
+}
+.rd-svgel-text {
+    font: 2.8px system-ui, sans-serif;
+    fill: #3a3f45;
+    pointer-events: none;
+}
+
+.rd-svghandle, .rd-svggrip {
+    fill: #fff;
+    stroke: #4c8bf5;
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+}
+
+.rd-svghandle { cursor: pointer; }
+.rd-svggrip { cursor: ns-resize; }
+
+.rd-svgband:hover .rd-svggrip, .rd-svgband.rd-selected .rd-svggrip { opacity: 1; pointer-events: auto; }
+/* opacity 0 doesn't affect hit-testing on its own — without pointer-events: none the invisible
+   grip still eats presses in its 2.5x2.5mm box, stealing anything underneath it. */
+.rd-svggrip { opacity: 0; pointer-events: none; transition: opacity 0.1s ease; }

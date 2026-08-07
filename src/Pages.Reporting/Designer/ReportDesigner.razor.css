@@ -1,0 +1,324 @@
+/* Designer CHROME only (scoped via Blazor CSS isolation). The report being designed
+   stays unstyled — styling reports is the consuming developer's job. */
+
+/* The designer fills whatever box the host gives it (height:100% of a sized parent);
+   every panel scrolls internally, so the tool itself never causes page scrolling.
+   In an unsized parent it degrades to natural document flow. */
+.rd-root {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    height: 100%;
+    min-height: 0;
+    box-sizing: border-box;
+    font-family: system-ui, sans-serif;
+    font-size: 13px;
+    color: #1c1e21;
+}
+
+/* ---- toolbar ---- */
+
+.rd-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+    padding: 8px 10px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.rd-toolbar button {
+    border: 1px solid rgba(0, 0, 0, 0.14);
+    background: #fff;
+    border-radius: 8px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #1c1e21;
+    transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.rd-toolbar button:hover {
+    background: #f5f6f8;
+}
+
+.rd-toolbar button.rd-active {
+    border-color: #1a66c2;
+    color: #1a66c2;
+    background: rgba(26, 102, 194, 0.06);
+}
+
+.rd-toolbar .rd-primary {
+    background: #1a66c2;
+    border-color: #1a66c2;
+    color: #fff;
+}
+
+.rd-toolbar .rd-primary:hover {
+    background: #15539e;
+}
+
+.rd-name {
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 15px;
+    font-weight: 650;
+    min-width: 240px;
+    color: #1c1e21;
+    background: transparent;
+}
+
+.rd-name:hover,
+.rd-name:focus {
+    border-color: rgba(0, 0, 0, 0.14);
+    background: #fff;
+    outline: none;
+}
+
+.rd-divider {
+    width: 1px;
+    height: 22px;
+    background: rgba(0, 0, 0, 0.12);
+}
+
+.rd-spacer {
+    flex: 1;
+}
+
+.rd-saved {
+    color: #1d7a1d;
+    font-weight: 600;
+    font-size: 12.5px;
+}
+
+/* ---- layout ---- */
+
+.rd-layout {
+    display: grid;
+    /* Palette and properties are fixed-purpose panels at fixed widths; every remaining
+       pixel goes to the canvas, so the tool fills its container however wide that is.
+       The sheet does not stretch with it — .rd-svgsheet centers itself (margin:0 auto)
+       inside the workspace, so extra width becomes room around the page rather than a
+       bigger page. minmax(0, 1fr) rather than 1fr because a grid item's min-width is
+       auto: without it the SVG's own width would push the column wider than the
+       container and defeat .rd-canvas's internal scrolling. The single row is pinned to
+       the remaining height so each column scrolls internally instead of growing. */
+    grid-template-columns: 220px minmax(0, 1fr) 320px;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 12px;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* ---- canvas: gray workspace with a white page sheet ---- */
+
+.rd-canvas {
+    background: #eceef1;
+    border: 1px solid rgba(0, 0, 0, 0.10);
+    border-radius: 10px;
+    padding: 24px 16px;
+    box-sizing: border-box;
+    min-height: 0;
+    /* The sheet scrolls inside the workspace. */
+    overflow: auto;
+}
+
+/* Empty-report hint ("Add a band from the toolbar…"), rendered on this component's own
+   markup — DesignerProperties has an .rd-hint rule too, but Blazor CSS isolation scopes
+   each .razor.css to its own component. */
+.rd-hint {
+    color: #8a8f97;
+    font-size: 12px;
+    margin: 2px 0;
+    line-height: 1.4;
+}
+
+/* Paper sheet — width/min-height/padding are inline (real page size + print margin).
+   The padding IS the print margin; the body inside it is the play area. Resets the
+   chrome's 13px back to the document base size so skeletons render at the same scale
+   as the real report (canvas and preview alike), and the chrome's font with it — this
+   is the preview sheet, and it now matches the canvas's own font:initial reset on the
+   ElementPreview foreignObject shim, so canvas and preview agree. */
+.rd-page {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    background: #fff;
+    box-sizing: border-box;
+    /* Auto margins centre the sheet in whatever the parameter panel leaves, and collapse to 0
+       when it no longer fits — so a sheet wider than the stage overflows to the right, where
+       .rd-preview-stage's scrollbar can reach it, instead of being clipped on both sides.
+       flex-shrink:0 because the sheet's inline width is a real page size: a flex item shrinks
+       by default, which would squeeze A4 narrower than A4 rather than letting it scroll. */
+    flex-shrink: 0;
+    margin: 0 auto;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.08);
+    font-size: 1rem;
+    font-family: initial;
+}
+
+/* ---- preview ---- */
+
+.rd-preview {
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+    padding: 14px;
+    background: #fff;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* Parameters beside the sheet, not above it. The preview is height-constrained — the whole
+   designer fits the viewport — so a bar across the top spent the one axis the report needs,
+   while horizontally there is room to spare. align-items:flex-start keeps the panel at its
+   own height instead of stretching down the sheet, which is also what leaves the sticky
+   positioning below somewhere to slide. */
+.rd-preview-stage {
+    background: #eceef1;
+    border-radius: 8px;
+    padding: 24px 16px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    align-items: flex-start;
+}
+
+.rd-preview-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-weight: 600;
+}
+
+.rd-preview-head button {
+    border: 1px solid rgba(0, 0, 0, 0.14);
+    background: #fff;
+    border-radius: 8px;
+    padding: 4px 12px;
+    cursor: pointer;
+    font-size: 12.5px;
+}
+
+.rd-preview-head button:hover {
+    background: #f5f6f8;
+}
+
+/* The preview's parameter bar. ReportParameters ships no styling — it is a pr-* component like
+   the report's own — so the designer dresses it here, and styles its OWN wrapper class rather
+   than the pr-* names, which belong to the consuming app.
+
+   ::deep is required, not decorative: CSS isolation stamps this component's scope attribute
+   onto its own markup only, and every element inside <ReportParameters> belongs to that
+   component instead. Without ::deep these compile to `.pr-param[b-xxxxx]` and match nothing. */
+/* The wrapper carries no width, padding or margin of its own. When the report declares no
+   parameters the component renders nothing, and a sized wrapper would leave a dead column
+   exactly where the old top bar left a dead row — so every dimension lives on .pr-params,
+   which exists only when there is something to show. Sticky so a tall report can be scrolled
+   without the inputs leaving the screen with it. */
+.rd-preview-params {
+    flex: 0 0 auto;
+    position: sticky;
+    top: 0;
+}
+
+/* A white card on the stage's gray, like .rd-sidebar and .rd-props on the editing screen. */
+.rd-preview-params ::deep .pr-params {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 220px;
+    margin-right: 16px;
+    box-sizing: border-box;
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.rd-preview-params ::deep .pr-param {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    font-size: 12px;
+    color: #5a5f66;
+}
+
+/* width + border-box because an <input>'s intrinsic size (roughly 20 characters) is wider
+   than the panel, and that intrinsic width would otherwise push the card past 220px. */
+.rd-preview-params ::deep .pr-param-input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid rgba(0, 0, 0, 0.16);
+    border-radius: 7px;
+    padding: 6px 9px;
+    font-size: 13px;
+    font-family: inherit;
+    color: #1c1e21;
+    background: #fff;
+}
+
+.rd-preview-params ::deep .pr-param-input:focus {
+    outline: none;
+    border-color: #1a66c2;
+}
+
+.rd-preview-params ::deep .pr-params-apply {
+    border: 1px solid #1a66c2;
+    background: #1a66c2;
+    color: #fff;
+    border-radius: 7px;
+    padding: 6px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.rd-preview-params ::deep .pr-params-apply:hover {
+    background: #15539e;
+}
+
+.rd-addband {
+    font: inherit;
+    font-size: 12.5px;
+    padding: 4px 8px;
+    border: 1px solid rgba(0, 0, 0, 0.14);
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+}
+
+.rd-zoom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #5c5a55;
+}
+
+.rd-zoom input { width: 90px; }
+
+/* Group arrangements that won't do what the author means. A warning, never a block: the
+   report still prints, so this is the only place the problem is visible. */
+.rd-warnings {
+    background: #fff8e6;
+    border: 1px solid #e6c86a;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: #6b5313;
+}
+
+.rd-warnings p {
+    margin: 2px 0;
+}

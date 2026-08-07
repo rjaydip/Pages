@@ -1,0 +1,106 @@
+# Publishes Pages.Reporting to nuget.org from main, on demand:
+#   Actions → Publish to NuGet → Run workflow.
+#
+# Manual by design. A NuGet version is immutable — a mistaken push can be unlisted but never
+# deleted or replaced — so nothing here fires on a push, a merge or a tag. Clicking Run is the
+# confirmation step, and the version published is whatever main's csproj says at that moment.
+#
+# Auth is NuGet trusted publishing: no API key is stored anywhere. The job proves its identity
+# to nuget.org with a GitHub OIDC token and gets a key valid for about an hour in return, so
+# there is no long-lived credential to leak or rotate. Two things must be in place:
+#   - a trusted publishing policy on nuget.org for this repository and this workflow file
+#   - a repository variable NUGET_USER holding your nuget.org username (not a secret)
+name: Publish to NuGet
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required for trusted publishing — without it the runner cannot mint the OIDC token that
+  # NuGet/login exchanges for a key, and the login step fails before anything is built.
+  id-token: write
+
+concurrency:
+  # Never two publishes at once, and never cancel one midway — a half-finished push can still
+  # leave a permanent version behind.
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      # Explicitly main, whatever ref the "Run workflow" dropdown was left on: this workflow
+      # publishes what is on main and nothing else.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Microsoft.Playwright alone is ~195 MB of bundled Node binaries. Only the package is
+      # restored — Chromium itself is never downloaded, because nothing here exports a PDF.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      # The version comes from main's csproj — nothing here can override it. Putting it in the
+      # log and the run summary is the last cheap chance to notice a number you did not intend.
+      - name: Show what is about to publish
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/Pages.Reporting/Pages.Reporting.csproj | head -1)
+          commit=$(git rev-parse --short HEAD)
+          echo "Publishing Pages.Reporting $version from $commit on main"
+          {
+            echo "### Pages.Reporting \`$version\`"
+            echo "from commit \`$commit\` on \`main\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore
+        run: dotnet restore Pages.slnx
+
+      # -warnaserror enforces the "0 warnings, 0 errors" bar docs/releasing.md sets for a
+      # release. Directory.Build.props leaves TreatWarningsAsErrors off for day-to-day work on
+      # purpose; this raises it for releases only. Documentation generation is on, so an
+      # incomplete <param> set fails here — intended, since those comments ship to consumers.
+      - name: Build
+        run: dotnet build Pages.slnx -c Release --no-restore -warnaserror
+
+      # The project, not the solution: packing the solution also visits the demo, which sets
+      # IsPackable=false, and NuGet then warns telling you to enable packaging on it. The advice
+      # is wrong — the demo is a sample — so packing the project directly keeps the log clean.
+      - name: Pack
+        run: dotnet pack src/Pages.Reporting/Pages.Reporting.csproj -c Release --no-build -o artifacts
+
+      # Kept even when the push succeeds: the exact bytes published, on the run that published
+      # them.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: artifacts/*
+
+      # Exchanges this run's OIDC token for a short-lived nuget.org key. Deliberately the last
+      # step before the push: the key expires in about an hour, and putting it after the build
+      # keeps that clock away from restore and compile time.
+      - name: Log in to NuGet (trusted publishing)
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      # The .snupkg beside it is pushed automatically. --skip-duplicate makes a re-run after a
+      # network blip a no-op rather than a hard failure, and makes running twice without
+      # bumping <Version> harmless instead of an error.
+      - name: Push to nuget.org
+        run: |
+          dotnet nuget push artifacts/*.nupkg \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+            --skip-duplicate

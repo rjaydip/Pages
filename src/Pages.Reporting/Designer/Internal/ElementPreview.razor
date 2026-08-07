@@ -1,0 +1,57 @@
+@namespace Pages.Reporting.Designer.Internal
+
+@* The real render components, painted inside the SVG canvas.
+
+   The unit shim is load-bearing. This sheet's SVG user unit is one MILLIMETRE, and HTML
+   inside a foreignObject lays out in CSS pixels worth one user unit each — so an unshimmed
+   font-size:40px would occupy 40 millimetres. Sizing the div in pixels (mm * 96/25.4) and
+   scaling it back down by 25.4/96 restores true CSS pixels, so every declaration StyleCss
+   emits means here exactly what it means in the browser and in the PDF.
+
+   pointer-events:none keeps .rd-svgel-box the only hit target, so drag, resize and selection
+   are untouched. overflow:hidden mirrors ReportElementView's own clipping, so an element
+   that overruns its rectangle is cut at its own edge here exactly as it is in print.
+
+   The shim's own font:initial;color:initial;text-align:initial; stops it inheriting the
+   designer chrome's typography (.rd-root: system-ui/13px/#1c1e21) — font:initial resolves to
+   "medium" (16px), which is exactly the printed document's own unset base, so the two track
+   each other by construction rather than by a magic number. The inner div then reapplies, in
+   print's own precedence order, the inherited text rules the print path gets for free from
+   nesting inside .pr-report and .pr-band — report first so a band's own style overrides it,
+   same as nesting does. *@
+<foreignObject width="@Fmt(WidthMm)" height="@Fmt(HeightMm)">
+    <div style="font:initial;color:initial;text-align:initial;width:@Fmt(WidthMm * PxPerMm)px;height:@Fmt(HeightMm * PxPerMm)px;transform:scale(@Fmt(1 / PxPerMm));transform-origin:0 0;overflow:hidden;pointer-events:none">
+        @* height:100% is load-bearing, not cargo-culted: the shim above has a definite pixel
+           height, and this div relays it down so ReportElementView's own height:100% (on
+           .pr-cell) has something definite to resolve against. Without it, this div is
+           auto-height, .pr-cell's 100% computes to auto per CSS 2.1, and a bordered element
+           shrink-wraps to its glyphs instead of filling the author's rectangle — the same bug
+           ReportElementView.razor:29-37 already fixes once, regressed here by inserting an
+           auto-height box between the shim and .pr-cell. *@
+        <div style="height:100%;@StyleCss.Concat(StyleCss.Inherited(ReportStyle), StyleCss.Inherited(BandStyle))">
+            <ReportElementView Element="Element" />
+        </div>
+    </div>
+</foreignObject>
+
+@code {
+    [Parameter, EditorRequired] public required ReportElement Element { get; set; }
+
+    /// <summary>The element's rectangle in millimetres — the same numbers the SVG box uses.</summary>
+    [Parameter, EditorRequired] public required double WidthMm { get; set; }
+
+    [Parameter, EditorRequired] public required double HeightMm { get; set; }
+
+    /// <summary>The report's own style — the canvas stand-in for .pr-report's inherited text rules.</summary>
+    [Parameter] public ElementStyle? ReportStyle { get; set; }
+
+    /// <summary>The band's style — the canvas stand-in for .pr-band's inherited text rules.</summary>
+    [Parameter] public ElementStyle? BandStyle { get; set; }
+
+    private const double PxPerMm = 96.0 / 25.4;
+
+    // SVG and CSS both need invariant numbers — a comma decimal separator would silently
+    // break the whole document on a locale like de-DE.
+    private static string Fmt(double value) =>
+        value.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+}

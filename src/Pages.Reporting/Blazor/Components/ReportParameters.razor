@@ -1,0 +1,115 @@
+@* Runtime values for a report's declared parameters, for handing to <ReportView Parameters>
+   or an exporter. Unstyled like every other pr-* component: the class names are the hooks and
+   the consuming app supplies the CSS.
+
+   A <form> rather than a bare div so Enter applies and label/for pairing is real; submission is
+   prevented because there is nothing to post — the values go to the parent through a callback. *@
+@if (_fields.Count > 0)
+{
+    <form class="pr-params" @onsubmit="Apply" @onsubmit:preventDefault>
+        @foreach (var field in _fields)
+        {
+            var name = Key(field);
+            @* Keyed by name, not index: if a host mutates Report.Parameters in place while this
+               is mounted (add/remove/reorder), positional diffing would reuse an input across
+               parameters and let an unblurred edit survive onto the wrong one. *@
+            <div class="pr-param" @key="name">
+                <label class="pr-param-label" for="@InputId(name)">@name</label>
+                <input class="pr-param-input" id="@InputId(name)"
+                       value="@_draft.GetValueOrDefault(name)"
+                       @onchange="e => _draft[name] = (string?)e.Value" />
+            </div>
+        }
+        <button class="pr-params-apply" type="submit">Apply</button>
+    </form>
+}
+
+@code {
+    [Parameter, EditorRequired] public required Report Report { get; set; }
+
+    /// <summary>
+    /// Values already applied — seeds the inputs. A name absent here falls back to that
+    /// parameter's own DefaultValue, matching how the resolver reads the same dictionary.
+    /// This seeds each input once per <see cref="Report"/> instance; once a key has a draft
+    /// value, later changes to <c>Values</c> are ignored so they cannot clobber what the reader
+    /// has already typed. Assign a new <see cref="Report"/> reference to force a reseed.
+    /// </summary>
+    [Parameter] public IReadOnlyDictionary<string, string?>? Values { get; set; }
+
+    /// <summary>Raised on Apply, with the dictionary to hand <see cref="ReportView.Parameters"/>.</summary>
+    [Parameter] public EventCallback<IReadOnlyDictionary<string, string?>> ValuesChanged { get; set; }
+
+    private readonly Dictionary<string, string?> _draft = new(StringComparer.OrdinalIgnoreCase);
+    private List<ParameterDefinition> _fields = [];
+    private Report? _seededFrom;
+
+    // The host page owns the document's id space and two reports can share a page, so the
+    // label/input pairing needs a prefix of its own rather than the bare parameter name.
+    private readonly string _idPrefix = $"pr-param-{Guid.NewGuid():N}";
+
+    protected override void OnParametersSet()
+    {
+        // A blank name is skipped because EffectiveParameters skips it too: a value supplied
+        // for it could never reach the SQL, so the input would be a dead control.
+        //
+        // Duplicate names are collapsed to one input (keeping the last definition) because
+        // EffectiveParameters is itself last-wins for duplicates — two inputs would imply a
+        // distinction the model does not have. GroupBy preserves first-appearance order of
+        // groups, which is what keeps the field order stable.
+        _fields = Report.Parameters
+            .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+            .GroupBy(Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToList();
+
+        // Reseed only when the report itself is swapped. Mutating the same Report in place —
+        // adding a parameter while designing — must not discard what has already been typed
+        // into the other boxes, and _fields above already picks the new one up.
+        if (!ReferenceEquals(Report, _seededFrom))
+        {
+            _seededFrom = Report;
+            _draft.Clear();
+        }
+
+        foreach (var field in _fields)
+        {
+            var name = Key(field);
+            if (!_draft.ContainsKey(name))
+                _draft[name] = Values is not null && Values.TryGetValue(name, out var supplied)
+                    ? supplied
+                    : field.DefaultValue;
+        }
+    }
+
+    // The resolver strips a leading @ before matching (EffectiveParameters), so the dictionary
+    // has to be keyed the same way or a parameter authored as "@minRevenue" silently never
+    // receives its value.
+    private static string Key(ParameterDefinition parameter) => parameter.Name.TrimStart('@');
+
+    private string InputId(string name) => $"{_idPrefix}-{name}";
+
+    // Applied on submit, never per keystroke: each apply re-runs every data set's SQL, so live
+    // binding would put a query on the database for every character typed.
+    //
+    // An empty box means "use the default" — the name is left out of the dictionary entirely,
+    // because EffectiveParameters falls back to DefaultValue only for keys that are ABSENT.
+    // Sending "" instead would pin the parameter to an empty string with no way back to the
+    // default short of reloading. The trade is that a deliberately-empty value cannot be
+    // expressed, which a string-only parameter model can live with.
+    private Task Apply()
+    {
+        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in _fields)
+        {
+            var name = Key(field);
+            if (_draft.GetValueOrDefault(name) is { Length: > 0 } value)
+                values[name] = value;
+            else
+                // An emptied box falls back to the default, so showing the default is the
+                // honest thing — otherwise the box disagrees with the value the report just
+                // resolved with, and with what the same component shows after a close/reopen.
+                _draft[name] = field.DefaultValue;
+        }
+        return ValuesChanged.InvokeAsync(values);
+    }
+}

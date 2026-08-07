@@ -1,0 +1,88 @@
+@* A band is a fixed-height canvas: elements are placed absolutely at their millimetre
+   coordinates from the band's top-left corner. Pure inline CSS, so this renders
+   identically on screen, in the designer, and in Chromium's printed header/footer
+   template. A Table band is the exception — it holds one table and takes its height
+   from the rows, so it can never clip its data. *@
+<CascadingValue Value="Scope" Name="GroupScope">
+    @if (Element.Type == BandType.Table)
+    {
+        <div class="pr-band @TypeClass @Element.CssClass" style="@StyleCss.Concat(GapCss, StyleCss.Inline(Element.Style))">
+            @if (Element.Elements.FirstOrDefault(child => child is TableElement) is { } table)
+            {
+                <ReportElementView Element="table" />
+            }
+        </div>
+    }
+    else
+    {
+        <div class="pr-band @TypeClass @MarginClass @Element.CssClass" style="@BandStyle">
+            <div class="pr-band-body" style="position:relative;height:100%;">
+                @foreach (var child in Element.Elements)
+                {
+                    <div class="pr-band-el" style="@PositionCss(child.Position)">
+                        <ReportElementView Element="child" />
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</CascadingValue>
+
+@code {
+    [Parameter, EditorRequired] public required PageBand Element { get; set; }
+
+    [CascadingParameter] public required ResolvedReport Resolved { get; set; }
+
+    /// <summary>Pins a once-per-report footer to the bottom of its container.</summary>
+    [Parameter] public bool PinToBottom { get; set; }
+
+    /// <summary>
+    /// Space to the next band, in millimetres. The band stack is block flow, so the gap
+    /// is a margin on the band rather than a gap on the container: a flex column
+    /// mispositions every sibling that follows a band which fragments across a printed
+    /// page, and a Table band fragments on any report longer than one page.
+    /// </summary>
+    [Parameter] public double GapBelowMm { get; set; }
+
+    /// <summary>The group this band is rendering inside, or null outside any group.</summary>
+    [Parameter] public GroupScope? Scope { get; set; }
+
+    // Every band gets a type-derived hook (pr-band-content, pr-band-pageheader, …) so a
+    // caller can style one band type without touching the others. pr-band-header/footer
+    // are narrower, older hooks for the two bands that actually print in the page margin —
+    // they must not leak onto ordinary content bands (a caller styling .pr-band-footer
+    // would otherwise decorate every non-margin band too).
+    private string TypeClass => $"pr-band-{Element.Type.ToString().ToLowerInvariant()}";
+
+    private string? MarginClass => Element.Type switch
+    {
+        BandType.PageHeader => "pr-band-header",
+        BandType.PageFooter => "pr-band-footer",
+        _ => null,
+    };
+
+    // A canvas band is a fixed-height box (its absolute children give it no height of their
+    // own), so every band — margin or body — takes its declared height.
+    // break-inside:avoid pushes a band that doesn't fit the remainder of a page onto the
+    // next one instead of letting Chromium fragment it — its absolutely positioned children
+    // would otherwise be cut or dropped mid-band.
+    private string? BandStyle => StyleCss.Concat(
+        StyleCss.Concat(
+            FormattableString.Invariant($"height:{Element.HeightMm}mm;overflow:hidden;break-inside:avoid;"),
+            StyleCss.Concat(PinToBottom ? "margin-top:auto;" : null, GapCss)),
+        StyleCss.Inline(Element.Style));
+
+    // Only the bands that have a successor carry a gap, so no margin can collapse out
+    // through the body's edge and become space the author never placed.
+    private string? GapCss =>
+        GapBelowMm > 0 ? FormattableString.Invariant($"margin-bottom:{GapBelowMm}mm;") : null;
+
+    // Millimetres map straight onto CSS mm, so the model's number is the printed number. An
+    // element with no position at all (freshly added, never dragged) fills its band — the
+    // one place a percentage is still the right answer.
+    private static string PositionCss(LayoutPosition? p) =>
+        p is null
+            ? "position:absolute;left:0;top:0;width:100%;height:100%;"
+            : FormattableString.Invariant(
+                $"position:absolute;left:{p.X}mm;top:{p.Y}mm;width:{p.Width}mm;height:{p.Height}mm;");
+}

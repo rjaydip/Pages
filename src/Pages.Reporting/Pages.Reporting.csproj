@@ -1,0 +1,81 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- The whole library ships as ONE package. The four former projects survive as folders
+         (Core lives at the root; Blazor/, Designer/, Export/), and every namespace is
+         unchanged — a namespace does not have to match an assembly name, so consumers keep
+         their existing `using Pages.Reporting.Core.Model;` and friends.
+
+         RootNamespace is what makes that free for the .razor files, whose namespace is
+         derived from their folder: Blazor/ReportView.razor lands in Pages.Reporting.Blazor
+         and Designer/ReportDesigner.razor in Pages.Reporting.Designer, exactly where they
+         were before. -->
+    <RootNamespace>Pages.Reporting</RootNamespace>
+
+  </PropertyGroup>
+
+  <!-- NuGet identity. The library ships as ONE package, so this all lives here rather than in
+       a shared props file; bump <Version> and everything follows. -->
+  <PropertyGroup>
+    <Version>0.2.0</Version>
+    <Authors>Rajpara Jaydip</Authors>
+    <Copyright>Copyright (c) 2026 Rajpara Jaydip</Copyright>
+    <Product>Pages.Reporting</Product>
+    <Description>A .NET 10 reporting library. Define a report once as a single self-contained JSON document, then render it on screen with Blazor, export it to PDF (headless Chromium, so it matches the screen) or Excel, and author it in a drag-and-drop designer. Ships zero report styling — components emit stable pr-* class names for your own CSS. Server-side: it carries ADO.NET drivers and Playwright, so it does not run in WebAssembly.</Description>
+    <PackageProjectUrl>https://github.com/rjaydip/Pages</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/rjaydip/Pages</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- An SPDX expression rather than a packed licence file: nuget.org renders it as a link
+         to the licence text, and consumers' tooling can read it without opening the package.
+         The LICENSE file at the repository root carries the same terms for GitHub. -->
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <!-- The file name as packed, not a path: PackageIcon names the entry inside the .nupkg,
+         which is why the ItemGroup below flattens it to the package root. PackageIconUrl is
+         deliberately absent — it is deprecated and nuget.org no longer renders it. -->
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageTags>reporting;report;pdf;excel;blazor;report-designer;charts</PackageTags>
+
+    <!-- Symbols and a deterministic build make a published package debuggable. -->
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- The XML doc comments here are written for maintainers, not as complete API docs, so
+         missing-comment warnings would bury real ones without improving anything. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
+    <!-- Packed but not built into the output: the icon ships in the .nupkg only. assets/icon.svg
+         is the editable source and stays out of the package. -->
+    <None Include="..\..\assets\icon.png" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+  <!-- Deliberately NOT <SupportedPlatform Include="browser" />, which the Blazor and Designer
+       class libraries each declared while they were separate assemblies. Merged, this one
+       assembly also carries AES-GCM encryption, four ADO.NET drivers and Playwright — none of
+       which run in WebAssembly. Claiming browser support would be false, and it made CA1416
+       fire on the encryption code. Pages.Reporting is a server-side library: Blazor Server,
+       or the server half of a Blazor Web App. -->
+
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
+    <PackageReference Include="MySqlConnector" Version="2.6.1" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+    <PackageReference Include="Microsoft.Playwright" Version="1.61.0" />
+  </ItemGroup>
+
+</Project>

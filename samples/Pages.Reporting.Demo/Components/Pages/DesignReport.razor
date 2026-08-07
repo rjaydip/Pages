@@ -52,6 +52,10 @@ else
         if (Id is int id)
         {
             Reports.Save(id, name, json);
+            // ReportDesigner treats a Json parameter that differs from what it last saved as a
+            // new document to load. This page must hold on to the saved JSON too, or the next
+            // OnParametersSet round-trip hands the designer the pre-save value and reverts the canvas.
+            _json = json;
         }
         else
         {

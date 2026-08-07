@@ -1,10 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Pages.Reporting.Core\Pages.Reporting.Core.csproj" />
-    <ProjectReference Include="..\..\src\Pages.Reporting.Blazor\Pages.Reporting.Blazor.csproj" />
-    <ProjectReference Include="..\..\src\Pages.Reporting.Export\Pages.Reporting.Export.csproj" />
-    <ProjectReference Include="..\..\src\Pages.Reporting.Designer\Pages.Reporting.Designer.csproj" />
+    <ProjectReference Include="..\..\src\Pages.Reporting\Pages.Reporting.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -12,6 +9,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <!-- A sample, not a shipped package: stated explicitly so `dotnet pack` on the solution
+         skips it silently instead of warning that packaging is disabled. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
 </Project>

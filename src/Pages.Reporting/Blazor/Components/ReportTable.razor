@@ -1,0 +1,168 @@
+<div class="pr-table-block @Element.CssClass" style="@StyleCss.Inline(Element.Style)">
+@if (!string.IsNullOrEmpty(Element.Title))
+{
+    <h3 class="pr-table-title" style="margin:0 0 6px;font-size:13.5px;font-weight:600">@Element.Title</h3>
+}
+@if (_data.Error is not null)
+{
+    <div class="pr-error">@_data.Error</div>
+}
+else if (_table is not null)
+{
+    @* Static, print-like table: full page width, every cell bordered, all rows shown.
+       The screen view is identical to the PDF. Override via pr-* classes / CssClass. *@
+    <table class="pr-table" style="width:100%;border-collapse:collapse">
+        <thead>
+        <tr>
+            @foreach (var column in _columns)
+            {
+                <th class="@column.AlignClass" style="@column.HeaderCellStyle">@column.HeaderText</th>
+            }
+        </tr>
+        </thead>
+        <tbody>
+        @foreach (var row in _table.Rows)
+        {
+            <tr>
+                @foreach (var column in _columns)
+                {
+                    <td class="@column.AlignClass" style="@column.CellStyle">@ValueFormatter.Format(row.GetValueOrDefault(column.Definition.Field), column.Definition.Format)</td>
+                }
+            </tr>
+        }
+        </tbody>
+        @if (_hasAggregates)
+        {
+            <tfoot>
+            <tr>
+                @foreach (var column in _columns)
+                {
+                    <td class="@column.AlignClass" style="@column.HeaderCellStyle">@AggregateText(column.Definition)</td>
+                }
+            </tr>
+            </tfoot>
+        }
+    </table>
+}
+</div>
+
+@code {
+    [Parameter, EditorRequired] public required TableElement Element { get; set; }
+    [CascadingParameter] public required ResolvedReport Resolved { get; set; }
+
+    /// <summary>The group this element is rendering inside, or null outside any group.</summary>
+    [CascadingParameter(Name = "GroupScope")] public GroupScope? Scope { get; set; }
+
+    private ResolvedData _data = ResolvedData.Empty;
+    private ReportDataTable? _table;
+    private Column[] _columns = [];
+    private bool _hasAggregates;
+
+    /// <summary>
+    /// A column with everything that depends only on the column (not on the row) already
+    /// resolved: the auto-alignment probe scans the row set, so doing it per cell would be
+    /// quadratic, and the two style strings are identical for every cell in the column.
+    /// </summary>
+    private readonly record struct Column(
+        ColumnDefinition Definition,
+        string HeaderText,
+        string AlignClass,
+        string CellStyle,
+        string HeaderCellStyle);
+
+    // Both Element (parameter) and Resolved (cascading value) feed this, and changes to either
+    // land here; OnAfterRender would never fire under static SSR or the PDF HtmlRenderer.
+    protected override void OnParametersSet()
+    {
+        _data = Resolved.GetData(Element);
+        // A table inside a group shows that group's slice. The scope's rows come from the same
+        // ReportDataTable this element resolved, so swapping the row list is enough — columns,
+        // formats and aggregates all still apply, now over the subset. Scope.For walks outward
+        // so a table bound to an OUTER group's data set still sees that group's rows, not the
+        // whole set, even when an inner group binds a different one.
+        _table = _data.Table is { } table
+            && Element.Binding is DataSetBinding reference
+            && Scope?.For(reference.Name) is { } scope
+            ? new ReportDataTable(table.Columns, scope.Rows)
+            : _data.Table;
+
+        // Empty Columns means "show whatever the query returned"; with no table (error or no
+        // binding result) there is nothing to show and the markup skips the table entirely.
+        IReadOnlyList<ColumnDefinition> definitions = Element.Columns.Count > 0
+            ? Element.Columns
+            : _table is null
+                ? []
+                : [.. _table.Columns.Select(c => new ColumnDefinition { Field = c })];
+
+        _columns = new Column[definitions.Count];
+        _hasAggregates = false;
+        for (var i = 0; i < definitions.Count; i++)
+        {
+            var definition = definitions[i];
+            var (alignClass, alignment) = Align(definition);
+            var cellStyle = $"border:1px solid #808080;padding:4px 8px;text-align:{alignment}";
+            _columns[i] = new Column(
+                definition,
+                definition.Header ?? definition.Field,
+                alignClass,
+                cellStyle,
+                cellStyle + ";font-weight:600");
+            _hasAggregates |= definition.Aggregate != ColumnAggregate.None;
+        }
+    }
+
+    private (string Class, string Css) Align(ColumnDefinition column) => column.Align switch
+    {
+        ColumnAlignment.Left => ("pr-left", "left"),
+        ColumnAlignment.Center => ("pr-center", "center"),
+        ColumnAlignment.Right => ("pr-right", "right"),
+        _ => IsNumericColumn(column.Field) ? ("pr-right", "right") : ("pr-left", "left"),
+    };
+
+    /// <summary>
+    /// Auto alignment follows the first value that exists, so all-null prefixes are skipped.
+    /// Probes the unscoped data (_data.Table), not the scoped _table: a column that happens to
+    /// be all-null in one group's slice but numeric overall would otherwise flip alignment
+    /// between repeats of the same band, which reads as a rendering glitch down the page.
+    /// </summary>
+    private bool IsNumericColumn(string field)
+    {
+        if (_data.Table is not { } table)
+            return false;
+
+        foreach (var row in table.Rows)
+        {
+            if (row.GetValueOrDefault(field) is { } sample)
+                return ValueFormatter.IsNumeric(sample);
+        }
+        return false;
+    }
+
+    private string AggregateText(ColumnDefinition column)
+    {
+        if (column.Aggregate == ColumnAggregate.None || _table is null)
+            return string.Empty;
+
+        var values = _table.Rows
+            .Select(r => r.GetValueOrDefault(column.Field))
+            .Where(v => v is not null)
+            .ToList();
+
+        if (column.Aggregate == ColumnAggregate.Count)
+            return values.Count.ToString("#,0");
+
+        var numbers = values.Where(ValueFormatter.IsNumeric).Select(ValueFormatter.ToDouble).ToList();
+        if (numbers.Count == 0)
+            return string.Empty;
+
+        var result = column.Aggregate switch
+        {
+            ColumnAggregate.Sum => numbers.Sum(),
+            ColumnAggregate.Average => numbers.Average(),
+            ColumnAggregate.Min => numbers.Min(),
+            ColumnAggregate.Max => numbers.Max(),
+            _ => 0,
+        };
+        return ValueFormatter.Format(result, column.Format ?? "#,0.##");
+    }
+}

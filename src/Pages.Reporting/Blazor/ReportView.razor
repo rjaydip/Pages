@@ -1,0 +1,286 @@
+@using global::Pages.Reporting.Blazor
+@inject IReportGenerator Generator
+@* IDisposable, not IAsyncDisposable: the only thing to release is a CancellationTokenSource,
+   whose Dispose is synchronous. Blazor calls one or the other (async wins when both are
+   implemented), so implementing only the sync one keeps disposal identical in interactive
+   circuits, static SSR and the HtmlRenderer used for PDF export. *@
+@implements IDisposable
+
+@* The root is a flex column so a page header/footer can sit outside the body, which is
+   itself the ordered list of bands (report title through report summary) — every band a
+   fixed-height canvas, except Table which grows with its rows. *@
+<div class="pr-report @(PrintMode ? "pr-print" : null)" style="@RootStyle">
+    @if (PrintMode && StyleCss.PageFrame(_resolved?.Definition.Style) is { } frame)
+    {
+        @* position:fixed repeats on every printed page → full-page border/background. *@
+        <div class="pr-page-frame" style="position:fixed;inset:0;pointer-events:none;z-index:-1;@frame"></div>
+    }
+    @if (!PrintMode && _resolved is not null
+         && PageSheet.BreakGuideCss(_resolved.Definition.Page, _resolved.Definition.Style, _resolved.Definition.Bands) is { } guide)
+    {
+        @* Faint line marking where the PDF starts each page — screen only, approximate. *@
+        <div class="pr-page-break" style="@guide"></div>
+    }
+    @if (_error is not null)
+    {
+        <div class="pr-error">@_error</div>
+    }
+    else if (_resolved is null)
+    {
+        <div class="pr-loading">Loading report…</div>
+    }
+    else
+    {
+        @* A connection that never opened affects every element bound to it. Showing it once
+           at the top is the difference between "the database is unreachable" and a grid of
+           elements each quietly reading "unavailable". *@
+        @foreach (var failure in _resolved.ConnectionFailures)
+        {
+            <div class="pr-error pr-connection-error" style="@ConnectionErrorStyle">@failure.Message</div>
+        }
+        <CascadingValue Value="_resolved" IsFixed="true">
+            <CascadingValue Value="PrintMode" Name="PrintMode">
+                <CascadingValue Value="PageTokenMode.Screen" Name="PageTokenMode">
+                    @* Page header/footer bands print in the page margin on every printed page;
+                       the exporter puts them there. On screen — one continuous sheet — they'd
+                       repeat pointlessly, so they show once here instead. Every other band
+                       lives in the body, in the order the author arranged them. *@
+                    @foreach (var band in ScreenOnlyMarginBands(BandType.PageHeader))
+                    {
+                        <PageBandView Element="band" />
+                    }
+                    <div class="pr-body" style="@BodyStyle">
+                        @for (var i = 0; i < FlowNodes.Count; i++)
+                        {
+                            var node = FlowNodes[i];
+                            @* Nothing follows the last band unless a summary is pinned below it,
+                               and a gap after the last one is trailing space that costs page
+                               height without separating anything. *@
+                            <PageBandView Element="node.Band" Scope="node.Scope"
+                                          GapBelowMm="@(i < FlowNodes.Count - 1 || PinnedSummary is not null ? BandGapMm : 0)" />
+                        }
+                    </div>
+                    @* A pinned summary sits OUTSIDE the body, as the root flex column's last
+                       item, because that is the only container it can reach the bottom of:
+                       the body is block flow (see BodyStyle) where margin-top:auto is zero,
+                       and it is also the element that fragments across pages. *@
+                    @if (PinnedSummary is { } summary)
+                    {
+                        <PageBandView Element="summary.Band" Scope="summary.Scope" PinToBottom="true" />
+                    }
+                    @foreach (var band in ScreenOnlyMarginBands(BandType.PageFooter))
+                    {
+                        <PageBandView Element="band" />
+                    }
+                </CascadingValue>
+            </CascadingValue>
+        </CascadingValue>
+    }
+</div>
+
+@code {
+    /// <summary>Report JSON produced by ReportJson.Serialize — the caller-stored document.</summary>
+    [Parameter] public string? Json { get; set; }
+
+    /// <summary>An in-memory report definition (alternative to Json).</summary>
+    [Parameter] public Report? Report { get; set; }
+
+    /// <summary>An already-resolved report (alternative to Json/Report; no data fetch happens).</summary>
+    [Parameter] public ResolvedReport? Resolved { get; set; }
+
+    /// <summary>Disables interactive chrome (sorting, paging) for print/PDF rendering.</summary>
+    [Parameter] public bool PrintMode { get; set; }
+
+    /// <summary>Runtime values overriding the report's parameter defaults (e.g. from the page URL).</summary>
+    [Parameter] public IReadOnlyDictionary<string, string?>? Parameters { get; set; }
+
+    // The root is a flex column so bands can sit above and below the body, and a report
+    // summary that is genuinely the last band can take margin-top:auto to reach the bottom
+    // edge. There is no body-level grid any more — each band is its own free canvas
+    // (BandType.Table excepted); the 12-column grid lives only inside SectionElement now.
+    private string? RootStyle => StyleCss.Concat(
+        StyleCss.Concat(
+            "display:flex;flex-direction:column;",
+            HasOnceFooter ? "flex:1 1 auto;" : null),
+        PrintMode
+            ? StyleCss.PageContent(_resolved?.Definition.Style)
+            // position + isolation anchor the page-break guide overlay between the
+            // page background and the components (its z-index:-1).
+            : StyleCss.Concat("position:relative;isolation:isolate;", StyleCss.Page(_resolved?.Definition.Style)));
+
+    // Structural, like the table's borders: the warning must be visible on screen, in the
+    // designer, and in the PDF without any developer CSS.
+    private const string ConnectionErrorStyle =
+        "border:1px solid #d98282;border-left-width:4px;border-radius:6px;background:#fdf2f2;"
+        + "color:#8f2f2f;padding:10px 12px;margin-bottom:12px;font-size:13px;";
+
+    /// <summary>The bands that flow through the body — every band except a pinned summary.</summary>
+    private IReadOnlyList<BandPlanNode> FlowNodes
+    {
+        get { EnsurePlan(); return _flowNodes; }
+    }
+
+    /// <summary>
+    /// The trailing report summary the root pins to the page bottom, or null. It is always the
+    /// last node when it exists: PinsToBottom only holds for the report's last body band, and a
+    /// band that last can have no group footer after it, so the plan never repeats it per group.
+    /// </summary>
+    private BandPlanNode? PinnedSummary
+    {
+        get { EnsurePlan(); return _pinnedSummary; }
+    }
+
+    private ResolvedReport? _plannedFrom;
+    private IReadOnlyList<BandPlanNode> _flowNodes = [];
+    private BandPlanNode? _pinnedSummary;
+
+    /// <summary>
+    /// Builds the render plan once per resolution: BandPlan expands each group into one node
+    /// per distinct value and hands every band the scope it belongs to (margin bands are
+    /// excluded by the plan itself — the exporter prints those into the page margin). Cached
+    /// because the markup reads the result once per band, and rebuilding the plan there would
+    /// re-partition every group's rows on each read.
+    /// </summary>
+    private void EnsurePlan()
+    {
+        if (ReferenceEquals(_plannedFrom, _resolved))
+            return;
+
+        _plannedFrom = _resolved;
+        var nodes = _resolved is null ? [] : BandPlan.Build(_resolved);
+        _pinnedSummary = _resolved is not null && nodes is [.., var last]
+            && BandTypes.PinsToBottom(_resolved.Definition, last.Band)
+            ? last
+            : null;
+        _flowNodes = _pinnedSummary is null ? nodes : [.. nodes.Take(nodes.Count - 1)];
+    }
+
+    // BandGapMm defaults to 0 — bands abut by default — but when an author sets one, it's a
+    // real gap between bands: it prints, so it costs page height. The designer's sheet uses the
+    // same value, which is what keeps the canvas honest about how much room the report takes.
+    // Each band carries it as its own bottom margin; see PageBandView.GapBelowMm for why the
+    // body cannot be the flex column that a container `gap` would need.
+    private double BandGapMm =>
+        _resolved is null ? 0 : PageSheet.BandGapMm(_resolved.Definition);
+
+    // Block flow, not a flex column: Chromium mispositions the siblings that follow a flex item
+    // fragmented across a page break, so the tail rows of a multi-page Table band printed on top
+    // of the group footer and the next group header. Block flow fragments correctly. The body is
+    // still a flex ITEM of the root, so flex:1 1 auto keeps it stretching when a summary is
+    // pinned below it.
+    private string BodyStyle =>
+        "display:block;" + (HasOnceFooter ? "flex:1 1 auto;" : null);
+
+    private IEnumerable<PageBand> BandsOfType(BandType type) =>
+        _resolved?.Definition.Bands.Where(band => band.Type == type) ?? [];
+
+    /// <summary>Margin bands print from the page margin, so the body must not repeat them.</summary>
+    private IEnumerable<PageBand> ScreenOnlyMarginBands(BandType type) =>
+        PrintMode ? [] : BandsOfType(type);
+
+    // Only stretches when a report summary will genuinely land on the pin — otherwise the
+    // flex:1 1 auto would reserve dead space for nothing (list order decides placement; see
+    // BandTypes.PinsToBottom).
+    private bool HasOnceFooter =>
+        _resolved is not null && BandTypes.HasPinnedSummary(_resolved.Definition);
+
+    private ResolvedReport? _resolved;
+    private string? _error;
+    private object? _lastSource;
+    private IReadOnlyDictionary<string, string?>? _lastParameters;
+
+    // Cancels the resolution that is still running when the parameters change again or the
+    // component goes away. ReportDataResolver holds every DbConnection open for the whole
+    // resolution, so an abandoned run keeps a connection — and the query behind it — alive
+    // on the server until it finishes on its own.
+    private CancellationTokenSource? _cts;
+
+    // Cancellation is cooperative: a run already past its last token check still completes and
+    // would publish stale data over a newer one. Each run remembers the counter value it
+    // started with and only writes to _resolved/_error while it is still the newest run.
+    private int _generation;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var source = (object?)Resolved ?? (object?)Report ?? Json;
+        var sameSource = ReferenceEquals(source, _lastSource)
+            || (source is string s && _lastSource is string last && s == last);
+        if (sameSource && SameParameters(Parameters, _lastParameters))
+            return;
+
+        _lastSource = source;
+        _lastParameters = Parameters;
+        _error = null;
+        _resolved = null;
+
+        var generation = ++_generation;
+        CancelInFlight();
+
+        // The Resolved path (and the "nothing supplied" path) does no async work, so it needs
+        // no token source at all — this is what HtmlRenderer uses during PDF export.
+        if (Resolved is not null || (Report is null && Json is null))
+        {
+            _resolved = Resolved;
+            if (_resolved is null)
+                _error = "No report was supplied. Set the Json, Report, or Resolved parameter.";
+            return;
+        }
+
+        var cts = _cts = new CancellationTokenSource();
+        try
+        {
+            var resolved = Report is not null
+                ? await Generator.GenerateAsync(Report, Parameters, cts.Token)
+                : await Generator.GenerateAsync(Json!, Parameters, cts.Token);
+            if (generation == _generation)
+                _resolved = resolved;
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded or disposed. A cancelled run has no UI of its own to report to: the
+            // run that replaced it already owns _resolved/_error.
+        }
+        catch (Exception ex)
+        {
+            if (generation == _generation)
+                _error = ex.Message;
+        }
+    }
+
+    private void CancelInFlight()
+    {
+        if (_cts is null)
+            return;
+        _cts.Cancel();
+        _cts.Dispose();
+        _cts = null;
+    }
+
+    // Reference equality alone re-resolves the whole report whenever a caller rebuilds an
+    // equivalent map on each render — a page projecting the query string into a fresh
+    // dictionary does exactly that. Parameter maps hold a handful of entries, so comparing
+    // them is far cheaper than re-running the queries.
+    private static bool SameParameters(
+        IReadOnlyDictionary<string, string?>? left,
+        IReadOnlyDictionary<string, string?>? right)
+    {
+        if (ReferenceEquals(left, right))
+            return true;
+        if (left is null || right is null || left.Count != right.Count)
+            return false;
+        foreach (var (key, value) in left)
+        {
+            if (!right.TryGetValue(key, out var other) || other != value)
+                return false;
+        }
+        return true;
+    }
+
+    // Bumping the generation as well as cancelling means a run that is mid-flight — or already
+    // past its last token check — cannot write to a disposed component's state.
+    public void Dispose()
+    {
+        _generation++;
+        CancelInFlight();
+    }
+}

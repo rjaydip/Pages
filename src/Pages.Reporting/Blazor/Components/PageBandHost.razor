@@ -1,0 +1,31 @@
+@* Renders every band of one BandType (PageHeader or PageFooter — the two margin band
+   types), for Chromium's PDF header/footer template. Those templates are isolated
+   documents with no access to the page's CSS, so this relies on the same inline styling
+   every element component already emits. *@
+<CascadingValue Value="Resolved" IsFixed="true">
+    <CascadingValue Value="true" Name="PrintMode">
+        <CascadingValue Value="Mode" Name="PageTokenMode">
+            @foreach (var band in Bands)
+            {
+                <PageBandView Element="band" />
+            }
+        </CascadingValue>
+    </CascadingValue>
+</CascadingValue>
+
+@code {
+    [Parameter, EditorRequired] public required ResolvedReport Resolved { get; set; }
+
+    /// <summary>
+    /// The margin band type to render — PageHeader or PageFooter. EditorRequired so the
+    /// Razor tooling flags a caller who omits it; defaults to PageHeader (rather than the
+    /// enum's own default, ReportTitle) so an omission caught only at runtime still renders
+    /// a margin band instead of silently putting the title band in a header/footer template.
+    /// </summary>
+    [Parameter, EditorRequired] public BandType Type { get; set; } = BandType.PageHeader;
+
+    [Parameter] public PageTokenMode Mode { get; set; } = PageTokenMode.PdfTemplate;
+
+    private IEnumerable<PageBand> Bands =>
+        Resolved.Definition.Bands.Where(band => band.Type == Type);
+}

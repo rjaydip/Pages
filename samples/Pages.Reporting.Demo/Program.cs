@@ -23,7 +23,7 @@ builder.Services.AddSingleton(new ReportRepository(dbPath));
 
 var app = builder.Build();
 
-DemoDatabase.Initialize(dbPath, app.Services.GetRequiredService<ReportJson>());
+DemoDatabase.Initialize(dbPath);
 
 if (!app.Environment.IsDevelopment())
 {
@@ -52,6 +52,18 @@ app.MapGet("/api/reports/{id:int}/pdf", async (int id, HttpRequest request, Repo
         return Results.NotFound();
     byte[] pdf = await exporter.ExportAsync(report.Json, parameters: QueryParameters(request), cancellationToken: ct);
     return Results.File(pdf, "application/pdf", $"{report.Name}.pdf");
+});
+
+// Same PDF, but with no download filename so Content-Disposition is "inline" — the
+// browser renders it in place. This is what the View Report page's <iframe> loads, so the
+// on-screen report is the real paginated artifact (discrete pages, repeating bands, real
+// page numbers) rather than the approximate single-sheet HTML view.
+app.MapGet("/api/reports/{id:int}/pdf-inline", async (int id, HttpRequest request, ReportRepository reports, PdfReportExporter exporter, CancellationToken ct) =>
+{
+    if (reports.Get(id) is not { } report)
+        return Results.NotFound();
+    byte[] pdf = await exporter.ExportAsync(report.Json, parameters: QueryParameters(request), cancellationToken: ct);
+    return Results.File(pdf, "application/pdf");
 });
 
 app.MapGet("/api/reports/{id:int}/xlsx", async (int id, HttpRequest request, ReportRepository reports, ExcelReportExporter exporter, CancellationToken ct) =>

@@ -1,0 +1,402 @@
+@using global::Pages.Reporting.Core.Serialization
+@inject ReportJson ReportJson
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="rd-root" @ref="_root">
+    <div class="rd-toolbar">
+        <input class="rd-name" @bind="_report.Name" @bind:after="MarkDirty" title="Report name" />
+        <span class="rd-divider"></span>
+        <button type="button" class="@(_selection is PageSelection ? "rd-active" : null)" @onclick="SelectPage">Page</button>
+        <select class="rd-addband" title="Add a report band"
+                @onchange="OnAddBandSelected" value="">
+            <option value="" disabled selected>+ Add band…</option>
+            @foreach (var type in BandLabels.Addable)
+            {
+                <option value="@type">@BandLabels.Label(type)</option>
+            }
+        </select>
+        <label class="rd-zoom" title="Canvas zoom">
+            <input type="range" min="0.5" max="2" step="0.1" @bind="_zoom" @bind:event="oninput" />
+            <span>@($"{_zoom * 100:0}%")</span>
+        </label>
+        <span class="rd-spacer"></span>
+        @if (_savedFlash)
+        {
+            <span class="rd-saved">Saved ✓</span>
+        }
+        <button type="button" class="@(_showPreview ? "rd-active" : null)" @onclick="Preview">Preview</button>
+        <button type="button" class="rd-primary" @onclick="Save">Save</button>
+    </div>
+
+    @if (_showPreview)
+    {
+        <div class="rd-preview">
+            <div class="rd-preview-head">
+                <span>Preview</span>
+                <span class="rd-spacer"></span>
+                <button type="button" @onclick="() => _showPreview = false">← Back to editing</button>
+            </div>
+            <div class="rd-preview-stage">
+                @* Try the report with real parameter values without leaving the designer. The
+                   bar renders nothing when the report declares no parameters, so reports
+                   without them look exactly as they did. *@
+                <div class="rd-preview-params">
+                    <ReportParameters Report="_report"
+                                      Values="_previewParameters"
+                                      ValuesChanged="ApplyPreviewParameters" />
+                </div>
+                @* Same paper sheet as the canvas; ReportView applies the page Style itself. *@
+                <div class="rd-page" style="@SheetCss()">
+                    <ReportView Report="_report" Parameters="_previewParameters" @key="_previewVersion" />
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        @if (BandSequence.Problems(_report) is { Count: > 0 } problems)
+        {
+            <div class="rd-warnings">
+                @foreach (var problem in problems)
+                {
+                    <p>⚠ @problem</p>
+                }
+            </div>
+        }
+        <div class="rd-layout">
+            <DesignerSidebar Report="_report"
+                             Selection="_selection"
+                             OnDragStart="StartPaletteDrag"
+                             OnDragEnd="EndDrag"
+                             OnSelectItem="SelectItem" />
+
+            <div class="rd-canvas" @onclick="SelectPage">
+                <SvgSheet Report="_report"
+                          Selection="_selection"
+                          Zoom="_zoom"
+                          OnSelectBand="SelectBand"
+                          OnSelectElement="Select"
+                          OnDropInto="DropIntoBand" />
+            </div>
+
+            <DesignerProperties Selection="_selection" Report="_report"
+                                OnChanged="MarkDirty"
+                                OnRemoveItem="RemoveItem" />
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Existing report JSON to edit; omit to start with an empty canvas.</summary>
+    [Parameter] public string? Json { get; set; }
+
+    /// <summary>
+    /// Fires with the updated report JSON (connection strings encrypted) when the user saves.
+    /// The designer persists nothing — what happens with the JSON is the host's decision.
+    /// </summary>
+    [Parameter] public EventCallback<string> OnSave { get; set; }
+
+    private Report _report = new() { Name = "New report" };
+    private object? _selection; // ReportElement | PageSelection | ConnectionDefinition | DataSetDefinition | ParameterDefinition
+    private double _zoom = 1;
+    private DragPayload? _drag;
+    private bool _showPreview;
+    private int _previewVersion;
+    private IReadOnlyDictionary<string, string?>? _previewParameters;
+    private bool _savedFlash;
+    private string? _loadedJson;
+    private bool _initialized;
+    private ElementReference _root;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<ReportDesigner>? _selfRef;
+
+    protected override void OnParametersSet()
+    {
+        if (_initialized && Json == _loadedJson)
+            return;
+        _initialized = true;
+        _loadedJson = Json;
+        _report = Json is null ? new Report { Name = "New report" } : ReportJson.Deserialize(Json);
+        _selection = null;
+        _previewParameters = null; // belonged to the report that was just replaced
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                _module = await JS.InvokeAsync<IJSObjectReference>(
+                    "import", "./_content/Pages.Reporting/Designer/ReportDesigner.razor.js");
+                await _module.InvokeVoidAsync("attach", _root);
+                _selfRef = DotNetObjectReference.Create(this);
+                await _module.InvokeVoidAsync("attachSvgSheet", _root, _selfRef);
+            }
+            catch (JSException)
+            {
+                // The module only smooths the HTML5 drag handshake (needed by Firefox).
+                // If it fails to load, the designer must keep working — don't kill the circuit.
+                // Band height stays editable through the properties panel's Height field.
+            }
+        }
+    }
+
+    private void Select(ReportElement element) => _selection = element;
+
+    // Any edit invalidates the "Saved ✓" flash. Leaving it up after a change would tell the
+    // author the report on screen is the report that was stored, which it no longer is.
+    private void MarkDirty()
+    {
+        _savedFlash = false;
+        StateHasChanged();
+    }
+
+    private void SelectPage() => _selection = PageSelection.Instance;
+
+    private void SelectBand(PageBand band) => _selection = new BandSelection(band);
+
+    private void OnAddBandSelected(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<BandType>(e.Value?.ToString(), out var type))
+            AddBand(type);
+    }
+
+    private void AddBand(BandType type)
+    {
+        _savedFlash = false;
+        var band = new PageBand { Type = type, Name = BandLabels.Label(type) };
+        _report.Bands.Add(band);
+        SelectBand(band);
+    }
+
+    private void RemoveBand(PageBand band)
+    {
+        _savedFlash = false;
+        _report.Bands.Remove(band);
+        if ((_selection as BandSelection)?.Band == band)
+            _selection = null;
+    }
+
+    /// <summary>
+    /// Called by the JS sheet session when a band is dragged to a new place in the sequence.
+    /// Band order is print order, so this is a real edit, not a designer convenience.
+    /// <paramref name="toIndex"/> is a slot among the OTHER bands, which is what the drag
+    /// computes — so the band is removed first and then inserted at that slot.
+    /// </summary>
+    [JSInvokable]
+    public Task MoveBandTo(int fromIndex, int toIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= _report.Bands.Count)
+            return Task.CompletedTask;
+
+        var band = _report.Bands[fromIndex];
+        _report.Bands.RemoveAt(fromIndex);
+        _report.Bands.Insert(Math.Clamp(toIndex, 0, _report.Bands.Count), band);
+        _selection = new BandSelection(band);
+        _savedFlash = false;
+        StateHasChanged(); // the call arrives off the Blazor event loop
+        return Task.CompletedTask;
+    }
+
+    private void SelectItem(object item) => _selection = item;
+
+    private void Remove(ReportElement element)
+    {
+        _savedFlash = false;
+        foreach (var band in _report.Bands)
+            if (RemoveFrom(band.Elements, element))
+                break;
+        if (ReferenceEquals(_selection, element))
+            _selection = null;
+    }
+
+    private void RemoveItem(object item)
+    {
+        _savedFlash = false;
+        switch (item)
+        {
+            case ReportElement element:
+                Remove(element);
+                return;
+            case ConnectionDefinition connection:
+                _report.Connections.Remove(connection);
+                break;
+            case DataSetDefinition dataSet:
+                _report.DataSets.Remove(dataSet);
+                break;
+            case ParameterDefinition parameter:
+                _report.Parameters.Remove(parameter);
+                break;
+            case BandSelection band:
+                RemoveBand(band.Band);
+                return;
+        }
+        if (ReferenceEquals(_selection, item))
+            _selection = null;
+    }
+
+    private static bool RemoveFrom(List<ReportElement> list, ReportElement element)
+    {
+        if (list.Remove(element))
+            return true;
+        foreach (var section in list.OfType<SectionElement>())
+            if (RemoveFrom(section.Children, element))
+                return true;
+        return false;
+    }
+
+    private void StartPaletteDrag(string type) => _drag = new DragPayload { PaletteType = type };
+
+    private void EndDrag() => _drag = null;
+
+    /// <summary>
+    /// Called by the JS drag session on pointer-up with the element's final rectangle in
+    /// millimetres. Resolves the element by (band, element) index — free positioning never
+    /// reorders the list, so the indices captured at drag-start are valid.
+    /// </summary>
+    [JSInvokable]
+    public Task CommitPosition(int bandIndex, int elIndex, double x, double y, double w, double h)
+    {
+        if (bandIndex < 0 || bandIndex >= _report.Bands.Count)
+            return Task.CompletedTask;
+        var band = _report.Bands[bandIndex];
+        if (elIndex < 0 || elIndex >= band.Elements.Count)
+            return Task.CompletedTask;
+        // A Table band's one TableElement has no position of its own — its box is a nominal
+        // placeholder (SheetGeometry.TableBandMm), not band.HeightMm, so clamping against the
+        // band's height here would fight the canvas and snap the drag back. Mirrors how
+        // CommitBandHeight already refuses a height for this band type.
+        if (band.Type == BandType.Table)
+            return Task.CompletedTask;
+
+        // Millimetres, absolute within the band. Clamped as a rectangle, not axis-by-axis: the
+        // origin is clamped first, then the size is clamped against what's left of the
+        // dragged rectangle from that origin — so the far edge the user didn't move stays put
+        // instead of the box growing past it, and the result always sits inside the box it
+        // will be clipped to at render time.
+        var margins = PageSheet.MarginsMm(_report.Page);
+        var contentWidth = PageSheet.SizeMm(_report.Page).Width - margins.Left - margins.Right;
+        var element = band.Elements[elIndex];
+        // The origin's own clamp range leaves room for at least the size floor below —
+        // otherwise an origin clamped flush to the far edge would make Math.Clamp's min
+        // exceed its max (0) when sizing next. The floor is the drag snap step
+        // (BandTypes.GridMinorMm), not an arbitrary 1mm, so a clamped drag and a JS-snapped
+        // one can never disagree about what the smallest legal rectangle is.
+        var clampedX = Math.Clamp(x, 0, Math.Max(contentWidth - BandTypes.GridMinorMm, 0));
+        var clampedY = Math.Clamp(y, 0, Math.Max(band.HeightMm - BandTypes.GridMinorMm, 0));
+        element.Position = new LayoutPosition
+        {
+            X = clampedX,
+            Y = clampedY,
+            Width = Math.Clamp(x + w - clampedX, BandTypes.GridMinorMm, Math.Max(contentWidth - clampedX, BandTypes.GridMinorMm)),
+            Height = Math.Clamp(y + h - clampedY, BandTypes.GridMinorMm, Math.Max(band.HeightMm - clampedY, BandTypes.GridMinorMm)),
+        };
+        _selection = element;
+        _savedFlash = false;
+        StateHasChanged(); // the call arrives off the Blazor event loop
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Called by the JS resize session on pointer-up with the band's final height in
+    /// millimetres. Nothing else to do: element rectangles are absolute, so a taller band
+    /// simply has more room below its contents.
+    /// </summary>
+    [JSInvokable]
+    public Task CommitBandHeight(int bandIndex, double heightMm)
+    {
+        if (bandIndex < 0 || bandIndex >= _report.Bands.Count)
+            return Task.CompletedTask;
+
+        var band = _report.Bands[bandIndex];
+        if (band.Type == BandType.Table)
+            return Task.CompletedTask;
+
+        band.HeightMm = Math.Max(heightMm, BandTypes.MinBandHeightMm);
+        _selection = new BandSelection(band);
+        _savedFlash = false;
+        StateHasChanged(); // the call arrives off the Blazor event loop
+        return Task.CompletedTask;
+    }
+
+    // Palette drop onto a band: the element gets a default rectangle and is dragged into
+    // place afterwards.
+    private void DropIntoBand(PageBand band)
+    {
+        _savedFlash = false;
+        var drag = _drag;
+        _drag = null;
+        if (drag?.PaletteType is not { } type)
+            return;
+
+        // A Table band holds exactly one table — its height comes from the rows, so a
+        // second element would have nowhere predictable to sit.
+        if (band.Type == BandType.Table && (type != "table" || band.Elements.Count > 0))
+            return;
+
+        var element = CreateElement(type);
+        if (band.Type != BandType.Table)
+            element.Position ??= BandTypes.DefaultPosition(band.Elements.Count);
+        band.Elements.Add(element);
+        Select(element);
+    }
+
+    private ReportElement CreateElement(string type)
+    {
+        var dataSet = _report.DataSets.FirstOrDefault()?.Name ?? string.Empty;
+        DataSetBinding NewBinding() => new() { Name = dataSet };
+
+        return type switch
+        {
+            "table" => new TableElement { Binding = NewBinding() },
+            "chart" => new ChartElement { LabelField = string.Empty, Binding = NewBinding() },
+            _ => new TextElement { Content = "New text" },
+        };
+    }
+
+    // Preview renders the real ReportView, so it still needs the paper-sized frame that
+    // PageSheet gives hosts. The editing canvas no longer uses it — that is the SVG sheet.
+    private string SheetCss() => PageSheet.Css(_report.Page);
+
+    private void Preview()
+    {
+        _showPreview = true;
+        _previewVersion++; // recreate ReportView so it re-resolves the edited definition
+    }
+
+    // Deliberately no _previewVersion bump: ReportView compares the parameter dictionary itself
+    // and re-resolves, cancelling any run still in flight, so recreating the component would
+    // throw that machinery away and restart from nothing. The bump exists for definition edits,
+    // which mutate _report in place and so are invisible to that comparison.
+    private void ApplyPreviewParameters(IReadOnlyDictionary<string, string?> values) =>
+        _previewParameters = values;
+
+    private async Task Save()
+    {
+        var json = ReportJson.Serialize(_report); // encrypts any plaintext connection strings
+        _loadedJson = json; // a host echoing the JSON back as a parameter must not reset the canvas
+        _savedFlash = true;
+        await OnSave.InvokeAsync(json);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_module is not null)
+                await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // circuit already gone — nothing to clean up
+        }
+        _selfRef?.Dispose();
+    }
+
+    internal sealed class DragPayload
+    {
+        public string? PaletteType { get; init; }
+    }
+}

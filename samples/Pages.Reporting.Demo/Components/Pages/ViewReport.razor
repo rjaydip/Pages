@@ -1,9 +1,11 @@
 @page "/reports/{Id:int}"
-@rendermode InteractiveServer
+@* Static SSR with no async work: the page is just chrome around an <iframe>. The heavy
+   lifting — resolve the data, render the report, print it with Chromium — happens in the
+   /pdf-inline endpoint the iframe loads, so the browser shows its own progress and streams
+   the PDF itself. No [StreamRendering] needed: this component resolves nothing slow. *@
 @using global::Pages.Reporting.Core.Serialization
 @inject ReportRepository Reports
 @inject NavigationManager Nav
-@inject ReportJson ReportJson
 
 <PageTitle>@(_report?.Name ?? "Report") — Pages.Reporting demo</PageTitle>
 
@@ -18,41 +20,26 @@ else
         <span class="spacer"></span>
         <a class="demo-button" href="/reports/@Id/designer">Open in designer</a>
         <a class="demo-button" href="/reports/@Id/builder">Open in builder</a>
-        <a class="demo-button" href="/reports/@Id/edit">Edit JSON</a>
         <a class="demo-button primary" href="/api/reports/@Id/pdf@(_query)" target="_blank">Download PDF</a>
         <a class="demo-button primary" href="/api/reports/@Id/xlsx@(_query)" target="_blank">Download Excel</a>
     </div>
 
-    <div class="demo-paper-stage">
-        @* PageSheet sizes the sheet from the report's own page settings — the same CSS
-           the designer canvas/preview uses, so all on-screen surfaces match the PDF. *@
-        <div class="demo-paper" style="@_sheetCss">
-            @* Query-string values become report parameter overrides, e.g. ?minRevenue=5000 *@
-            <ReportView Report="_definition" Parameters="_parameters" />
-        </div>
-    </div>
+    @* The real paginated artifact. Query-string values (?minRevenue=5000) flow straight
+       through to the endpoint as report parameter overrides. If the frame stays blank,
+       "Download PDF" above is the fallback. *@
+    <iframe class="demo-pdf" title="@(_report.Name) (PDF)"
+            src="/api/reports/@Id/pdf-inline@(_query)"></iframe>
 }
 
 @code {
     [Parameter] public int Id { get; set; }
 
     private StoredReport? _report;
-    private global::Pages.Reporting.Core.Model.Report? _definition;
-    private string _sheetCss = string.Empty;
-    private Dictionary<string, string?>? _parameters;
     private string _query = string.Empty;
 
     protected override void OnParametersSet()
     {
         _report = Reports.Get(Id);
-        _definition = _report is null ? null : ReportJson.Deserialize(_report.Json);
-        _sheetCss = _definition is null ? string.Empty : PageSheet.Css(_definition.Page);
-
-        var uri = new Uri(Nav.Uri);
-        _query = uri.Query;
-        _parameters = string.IsNullOrEmpty(uri.Query)
-            ? null
-            : Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query)
-                .ToDictionary(kv => kv.Key, kv => (string?)kv.Value.ToString());
+        _query = new Uri(Nav.Uri).Query;
     }
 }

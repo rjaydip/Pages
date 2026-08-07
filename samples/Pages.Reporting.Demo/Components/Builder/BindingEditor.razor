@@ -16,19 +16,18 @@
         </label>
     </div>
     <label class="b-field">
-        <span>SQL @(Scalar ? "(must return a single value)" : "(returns the rows)")</span>
+        <span>SQL (returns the rows)</span>
         <textarea rows="3" @bind="Sql.Sql" spellcheck="false"></textarea>
     </label>
 }
 else
 {
-    <p class="demo-note">This element uses an inline (static) data binding — edit it via the JSON editor.</p>
+    <p class="demo-note">This element uses an inline (static) data binding. This builder can't edit it — open the report in the designer to swap it for a data set.</p>
 }
 
 @code {
     [Parameter, EditorRequired] public required DataBinding Binding { get; set; }
     [Parameter, EditorRequired] public required Report Report { get; set; }
-    [Parameter] public bool Scalar { get; set; }
 
     private SqlBinding? Sql => Binding as SqlBinding;
 }

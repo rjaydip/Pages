@@ -18,9 +18,7 @@
 
 <div class="b-add">
     <select @bind="_newType">
-        <option value="title">Title</option>
-        <option value="kpiCard">KPI card</option>
-        <option value="value">Single value</option>
+        <option value="text">Text</option>
         <option value="chart">Chart</option>
         <option value="table">Table</option>
         <option value="section">Section (layout)</option>
@@ -32,19 +30,29 @@
     [Parameter, EditorRequired] public required List<ReportElement> Elements { get; set; }
     [Parameter, EditorRequired] public required Report Report { get; set; }
 
-    private string _newType = "title";
+    /// <summary>
+    /// True when <see cref="Elements"/> is a band's own element list (free-positioned), so a
+    /// newly added element needs a staggered default rectangle — the same one the designer
+    /// gives a palette drop — or it lands exactly on top of the previous element
+    /// (PageBandView.PositionCss(null) is a full-bleed rectangle). False for a section's
+    /// Children, which stay on the 12-column grid and carry no Position.
+    /// </summary>
+    [Parameter] public bool IsBandElements { get; set; }
+
+    private string _newType = "text";
 
     private void Add()
     {
-        Elements.Add(_newType switch
+        var element = _newType switch
         {
-            "value" => new ValueElement { Label = "New value", Binding = NewBinding() },
-            "kpiCard" => new KpiCardElement { Label = "New KPI", Binding = NewBinding() },
             "chart" => new ChartElement { Title = "New chart", LabelField = "", Binding = NewBinding() },
             "table" => new TableElement { Title = "New table", Binding = NewBinding() },
             "section" => new SectionElement { Direction = SectionDirection.Row },
-            _ => new TitleElement { Text = "New title" },
-        });
+            _ => (ReportElement)new TextElement { Content = "New text" },
+        };
+        if (IsBandElements)
+            element.Position = BandTypes.DefaultPosition(Elements.Count);
+        Elements.Add(element);
     }
 
     private SqlBinding NewBinding() => new()
@@ -63,11 +71,9 @@
 
     private static string TypeName(ReportElement element) => element switch
     {
-        TitleElement => "Title",
-        ValueElement => "Single value",
-        KpiCardElement => "KPI card",
         ChartElement chart => $"Chart · {chart.ChartType}",
         TableElement => "Table",
+        TextElement => "Text",
         SectionElement section => $"Section · {(section.Direction == SectionDirection.Row ? "row" : "column")}",
         _ => element.GetType().Name,
     };

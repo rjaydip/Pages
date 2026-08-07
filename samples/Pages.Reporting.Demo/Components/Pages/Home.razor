@@ -1,5 +1,6 @@
 @page "/"
 @inject ReportRepository Reports
+@inject NavigationManager Nav
 
 <PageTitle>Reports — Pages.Reporting demo</PageTitle>
 
@@ -11,20 +12,67 @@
 </div>
 <p class="demo-note">
     Each report below is a single JSON document stored in the demo's own SQLite database —
-    the library never persists anything. Open one to render it from that JSON, edit the JSON,
-    or download it as PDF/Excel.
+    the library never persists anything. Open one to render it from that JSON, or download it
+    as PDF/Excel.
 </p>
 
 <div class="demo-card">
-    <ul class="demo-list">
-        @foreach (var report in Reports.List())
-        {
-            <li>
-                <a href="/reports/@report.Id">
-                    <span>@report.Name</span>
-                    <span class="hint">view →</span>
-                </a>
-            </li>
-        }
-    </ul>
+    @* Static SSR form post — no render mode, no circuit. The whole list sits in one form so
+       there is a single @formname; the submit button in each row carries that row's id. *@
+    <form method="post" @formname="delete-report" @onsubmit="DeleteReport">
+        <AntiforgeryToken />
+        <ul class="demo-list">
+            @foreach (var report in _reports)
+            {
+                <li>
+                    <a href="/reports/@report.Id">
+                        <span>@report.Name</span>
+                        <span class="hint">view →</span>
+                    </a>
+                    @* Two-step by design: <details> keeps the real button hidden until the
+                       author opens it, so a stray click cannot destroy a report they spent
+                       time designing. Native disclosure — no JS, works in static SSR. *@
+                    <details class="demo-delete">
+                        <summary>Delete</summary>
+                        <button type="submit" name="Input.Id" value="@report.Id">Yes, delete</button>
+                    </details>
+                </li>
+            }
+        </ul>
+    </form>
+    @if (_reports.Count == 0)
+    {
+        <p class="demo-note" style="padding:14px 18px;margin:0">
+            No reports yet — start one with <strong>+ New report</strong>.
+        </p>
+    }
 </div>
+
+@code {
+    private List<StoredReport> _reports = [];
+
+    // Both must be public: a public property of a private nested type is CS0053
+    // ("inconsistent accessibility"), and the form-binding prefix is the property name,
+    // which is why the button below is name="Input.Id" and not anything else.
+    // No property initializer here: combining one with [SupplyParameterFromForm] trips
+    // analyzer BL0008 (the framework can overwrite it with null on binding), so this is
+    // left nullable and null-checked in DeleteReport instead.
+    [SupplyParameterFromForm] public DeleteInput? Input { get; set; }
+
+    /// <summary>The id of the row whose button was pressed; bound from name="Input.Id".</summary>
+    public sealed class DeleteInput
+    {
+        public int Id { get; set; }
+    }
+
+    protected override void OnInitialized() => _reports = Reports.List();
+
+    // Post/Redirect/Get: navigating re-issues the listing as a fresh GET, so the deleted row
+    // is gone from what renders and a browser refresh cannot repost the delete.
+    private void DeleteReport()
+    {
+        if (Input is { Id: > 0 })
+            Reports.Delete(Input.Id);
+        Nav.NavigateTo("/");
+    }
+}

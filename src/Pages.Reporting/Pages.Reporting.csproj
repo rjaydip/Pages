@@ -21,7 +21,7 @@
   <!-- NuGet identity. The library ships as ONE package, so this all lives here rather than in
        a shared props file; bump <Version> and everything follows. -->
   <PropertyGroup>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <Authors>Rajpara Jaydip</Authors>
     <Copyright>Copyright (c) 2026 Rajpara Jaydip</Copyright>
     <Product>Pages.Reporting</Product>

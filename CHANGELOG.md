@@ -6,9 +6,41 @@ Versions are `0.x` deliberately: until `1.0` a minor bump may carry a breaking c
 `<Version>` in `src/Pages.Reporting/Pages.Reporting.csproj` is the source of truth for the
 number — see [docs/releasing.md](docs/releasing.md) for how a release is cut.
 
-## 0.2.0 — unreleased
+## Unreleased
 
-Nothing has been published to nuget.org yet, so this will be the first release on the gallery.
+Nothing yet. What is planned is in [ROADMAP.md](ROADMAP.md) — this file records what shipped.
+
+## 0.2.1 — 2026-08-09
+
+Documentation only. No library code changed, so upgrading from 0.2.0 is optional — but the
+package page on nuget.org shows the README embedded in each version, and 0.2.0's is the older
+one. This release exists to correct it.
+
+### Changed
+
+- **README links now work from nuget.org.** Seven links were relative (`docs/…`, `LICENSE`,
+  `CHANGELOG.md`), which resolve on GitHub and 404 for anyone arriving from the package page.
+  They are absolute now.
+- **README trimmed** from 226 lines to roughly 170. Nothing was dropped: the Blazor support
+  matrix and the Chromium pre-install guide moved into the new
+  [hosting guide](https://github.com/rjaydip/Pages/blob/main/docs/hosting.md).
+- **Removed the downloads badge.** NuGet's download statistics lag their own search index by
+  hours, so the badge and nuget.org disagreed with each other; the number means little for a
+  package this new either way.
+
+### Added
+
+- **Screenshots in the README** — the designer, the same definition printed to PDF, and
+  parameters applied in the preview.
+- **[Hosting guide](https://github.com/rjaydip/Pages/blob/main/docs/hosting.md)** — supported
+  Blazor render modes, pre-installing Chromium without PowerShell, and why fonts must be
+  installed where Chromium runs.
+- **[ROADMAP.md](https://github.com/rjaydip/Pages/blob/main/ROADMAP.md)** — what is planned, and
+  which of it already exists so it does not get built twice.
+
+## 0.2.0 — 2026-08-07
+
+First release on nuget.org.
 
 ### Added
 

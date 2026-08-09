@@ -16,6 +16,8 @@ on:
   workflow_dispatch:
 
 permissions:
+  # Read-only on the repository: this workflow publishes to nuget.org and writes nothing back
+  # to GitHub — no tags, no releases. The Releases tab stays empty on purpose.
   contents: read
   # Required for trusted publishing — without it the runner cannot mint the OIDC token that
   # NuGet/login exchanges for a key, and the login step fails before anything is built.

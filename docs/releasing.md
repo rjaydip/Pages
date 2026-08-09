@@ -53,6 +53,10 @@ input to override it and no push, merge or tag that can fire it by accident. The
 building, attaches the `.nupkg`/`.snupkg` to the run, and pushes with `--skip-duplicate` so a
 re-run after a network blip is a no-op rather than a failure.
 
+It writes nothing back to GitHub — no tags, no GitHub Releases, and nothing to GitHub Packages
+(a separate registry from nuget.org). Those tabs stay empty by design; the published record is
+nuget.org, and the human-readable one is [`CHANGELOG.md`](../CHANGELOG.md).
+
 ### Authentication
 
 The workflow uses **NuGet trusted publishing** — no API key is stored anywhere. The job proves

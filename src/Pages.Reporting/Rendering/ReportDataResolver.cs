@@ -1,4 +1,5 @@
 using System.Data.Common;
+using Microsoft.Extensions.Logging;
 using Pages.Reporting.Core.Data;
 using Pages.Reporting.Core.Model;
 using Pages.Reporting.Core.Security;
@@ -11,15 +12,17 @@ namespace Pages.Reporting.Core.Rendering;
 /// export. Every binding returns rows; the single values a text token shows are reduced from
 /// those rows by <see cref="ScalarValues"/>, not fetched separately.
 /// </summary>
-public sealed class ReportDataResolver(IReportCipher cipher)
+public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataResolver> logger)
 {
     public async Task<ResolvedReport> ResolveAsync(
         Report report,
-        IReadOnlyDictionary<string, string?>? parameters = null,
+        ReportRuntimeOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         var data = new Dictionary<ReportElement, ResolvedData>();
-        var context = new ResolveContext(EffectiveParameters(report, parameters));
+        var context = new ResolveContext(
+            EffectiveParameters(report, options?.Parameters),
+            EffectiveConnectionStrings(report, options?.ConnectionStrings));
 
         try
         {
@@ -76,8 +79,11 @@ public sealed class ReportDataResolver(IReportCipher cipher)
     public async Task<ResolvedData> ResolveBindingAsync(
         Report report, DataBinding binding, CancellationToken cancellationToken = default)
     {
-        // designer/discovery: parameter defaults apply
-        var context = new ResolveContext(EffectiveParameters(report, overrides: null));
+        // designer/discovery: parameter defaults apply, and connections are always the
+        // authored ones — there is no runtime channel here.
+        var context = new ResolveContext(
+            EffectiveParameters(report, overrides: null),
+            EffectiveConnectionStrings(report, overrides: null));
         try
         {
             return await ExecuteAsync(report, binding, context, cancellationToken);
@@ -100,6 +106,9 @@ public sealed class ReportDataResolver(IReportCipher cipher)
     /// </summary>
     public async Task<string?> TestConnectionAsync(ConnectionDefinition definition, CancellationToken cancellationToken = default)
     {
+        if (definition.SuppliedAtRuntime)
+            return "This connection is supplied at generation time — there is nothing stored to test here.";
+
         try
         {
             var connectionString = cipher.IsEncrypted(definition.ConnectionString)
@@ -197,17 +206,51 @@ public sealed class ReportDataResolver(IReportCipher cipher)
     private static Dictionary<string, string?> EffectiveParameters(
         Report report, IReadOnlyDictionary<string, string?>? overrides)
     {
+        var supplied = NormalizeKeys(overrides);
         var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var parameter in report.Parameters)
         {
             if (string.IsNullOrWhiteSpace(parameter.Name))
                 continue;
             var name = parameter.Name.TrimStart('@');
-            values[name] = overrides is not null && overrides.TryGetValue(name, out var supplied)
-                ? supplied
-                : parameter.DefaultValue;
+            values[name] = supplied.TryGetValue(name, out var value) ? value : parameter.DefaultValue;
         }
         return values;
+    }
+
+    /// <summary>
+    /// Runtime connection-string overrides, for declared connections marked
+    /// <see cref="ConnectionDefinition.SuppliedAtRuntime"/> only. Unknown keys are ignored and
+    /// a whitespace-only value counts as "not supplied".
+    /// </summary>
+    private static Dictionary<string, string?> EffectiveConnectionStrings(
+        Report report, IReadOnlyDictionary<string, string?>? overrides)
+    {
+        var supplied = NormalizeKeys(overrides);
+        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var connection in report.Connections)
+        {
+            if (!connection.SuppliedAtRuntime || string.IsNullOrWhiteSpace(connection.Name))
+                continue;
+            if (supplied.TryGetValue(connection.Name, out var value) && !string.IsNullOrWhiteSpace(value))
+                values[connection.Name] = value;
+        }
+        return values;
+    }
+
+    /// <summary>
+    /// Rebuilds a host-supplied map with a case-insensitive comparer — the caller's dictionary
+    /// is usually ordinal (e.g. projected straight from a query string). A last-wins loop
+    /// rather than the <see cref="Dictionary{TKey,TValue}"/> copy constructor, which throws
+    /// when two keys collide only under the new comparer.
+    /// </summary>
+    private static Dictionary<string, string?> NormalizeKeys(IReadOnlyDictionary<string, string?>? source)
+    {
+        var normalized = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        if (source is not null)
+            foreach (var (key, value) in source)
+                normalized[key] = value;
+        return normalized;
     }
 
     /// <summary>
@@ -363,11 +406,34 @@ public sealed class ReportDataResolver(IReportCipher cipher)
         var definition = report.Connections.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException($"The report declares no connection named '{name}'.");
 
-        var connection = DbConnectionFactory.Create(
-            definition.Provider,
-            cipher.IsEncrypted(definition.ConnectionString)
+        string connectionString;
+        if (definition.SuppliedAtRuntime)
+        {
+            // Runtime-supplied: the value comes from the caller and is used verbatim — the
+            // cipher is never run on it. The provider still comes from the definition.
+            if (!context.ConnectionOverrides.TryGetValue(name, out var overrideValue)
+                || string.IsNullOrWhiteSpace(overrideValue))
+            {
+                var missing = $"Connection '{name}' must be supplied at generation time.";
+                context.ConnectionErrors[name] = missing;
+                throw new InvalidOperationException(missing);
+            }
+            connectionString = overrideValue;
+        }
+        else
+        {
+            connectionString = cipher.IsEncrypted(definition.ConnectionString)
                 ? cipher.Decrypt(definition.ConnectionString)
-                : definition.ConnectionString);
+                : definition.ConnectionString;
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                var missing = $"Connection '{name}' has no connection string.";
+                context.ConnectionErrors[name] = missing;
+                throw new InvalidOperationException(missing);
+            }
+        }
+
+        var connection = DbConnectionFactory.Create(definition.Provider, connectionString);
 
         try
         {
@@ -378,9 +444,13 @@ public sealed class ReportDataResolver(IReportCipher cipher)
             // The connection never joined the dictionary, so the finally-block cleanup in
             // ResolveAsync would not have disposed it.
             await connection.DisposeAsync();
-            var message = $"Could not connect to '{name}': {ex.Message}";
+            // The provider message can carry the connection string (host, user, sometimes
+            // the password), and this text reaches a report banner — so keep it to the
+            // declared name and log the detail server-side instead.
+            logger.LogWarning(ex, "Could not open report connection '{Connection}'.", name);
+            var message = $"Could not connect to '{name}'.";
             context.ConnectionErrors[name] = message;
-            throw new InvalidOperationException(message, ex);
+            throw new InvalidOperationException(message);
         }
         catch
         {
@@ -394,16 +464,22 @@ public sealed class ReportDataResolver(IReportCipher cipher)
 
     /// <summary>
     /// Per-resolution state: the open connections, the data-set cache every consumer shares,
-    /// the effective parameter values, and the connections that failed to open.
-    /// Single-threaded by construction — one resolution at a time.
+    /// the effective parameter values, the runtime connection-string overrides, and the
+    /// connections that failed to open. Single-threaded by construction — one resolution at a
+    /// time — which is why the runtime inputs can be plain method arguments.
     /// </summary>
-    private sealed class ResolveContext(Dictionary<string, string?> parameterValues)
+    private sealed class ResolveContext(
+        Dictionary<string, string?> parameterValues,
+        Dictionary<string, string?> connectionOverrides)
     {
         public Dictionary<string, DbConnection> Connections { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public Dictionary<string, ResolvedData> DataSets { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public Dictionary<string, string> ConnectionErrors { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Runtime connection strings by connection name, for SuppliedAtRuntime connections only.</summary>
+        public Dictionary<string, string?> ConnectionOverrides { get; } = connectionOverrides;
 
         public Dictionary<string, string?> ParameterValues { get; } = parameterValues;
 

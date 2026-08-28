@@ -11,6 +11,19 @@ public sealed class ConnectionDefinition
 
     public DatabaseProvider Provider { get; set; }
 
-    /// <summary>Plaintext while building in memory; ciphertext after serialization.</summary>
+    /// <summary>
+    /// When true, the connection string is not stored in the report: <see cref="ConnectionString"/>
+    /// is left empty and the caller must pass one at generation time via
+    /// <see cref="Rendering.ReportRuntimeOptions.ConnectionStrings"/>, keyed by <see cref="Name"/>.
+    /// Lets one report run against dev/staging/prod, or a per-tenant database, without
+    /// duplicating the definition. When false (the default) the stored string is always used
+    /// and any runtime value for this name is ignored.
+    /// </summary>
+    public bool SuppliedAtRuntime { get; set; }
+
+    /// <summary>
+    /// Plaintext while building in memory; ciphertext after serialization. Empty when
+    /// <see cref="SuppliedAtRuntime"/> is true.
+    /// </summary>
     public required string ConnectionString { get; set; }
 }

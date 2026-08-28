@@ -16,6 +16,7 @@ internal sealed class EncryptingConnectionConverter(IReportCipher cipher) : Json
     {
         string? name = null, connectionString = null;
         var provider = DatabaseProvider.SqlServer;
+        var suppliedAtRuntime = false;
 
         if (reader.TokenType != JsonTokenType.StartObject)
             throw new JsonException("Expected an object for a connection definition.");
@@ -32,6 +33,9 @@ internal sealed class EncryptingConnectionConverter(IReportCipher cipher) : Json
                 case "provider":
                     provider = Enum.Parse<DatabaseProvider>(reader.GetString()!, ignoreCase: true);
                     break;
+                case "suppliedatruntime":
+                    suppliedAtRuntime = reader.GetBoolean();
+                    break;
                 case "connectionstring":
                     connectionString = reader.GetString();
                     break;
@@ -41,21 +45,40 @@ internal sealed class EncryptingConnectionConverter(IReportCipher cipher) : Json
             }
         }
 
-        if (name is null || connectionString is null)
-            throw new JsonException("Connection definition requires 'name' and 'connectionString'.");
+        if (name is null)
+            throw new JsonException("Connection definition requires 'name'.");
 
-        return new ConnectionDefinition { Name = name, Provider = provider, ConnectionString = connectionString };
+        // A runtime-supplied connection carries no stored string, so the property may be
+        // absent or empty; every other connection must have one.
+        if (connectionString is null && !suppliedAtRuntime)
+            throw new JsonException("Connection definition requires 'connectionString'.");
+
+        return new ConnectionDefinition
+        {
+            Name = name,
+            Provider = provider,
+            SuppliedAtRuntime = suppliedAtRuntime,
+            ConnectionString = connectionString ?? string.Empty,
+        };
     }
 
     public override void Write(Utf8JsonWriter writer, ConnectionDefinition value, JsonSerializerOptions options)
     {
-        var token = cipher.IsEncrypted(value.ConnectionString)
-            ? value.ConnectionString
-            : cipher.Encrypt(value.ConnectionString);
+        // A runtime-supplied connection stores no string. A blank string on any other
+        // connection is written through as "" rather than an encrypted empty token: the
+        // cipher uses a random nonce, so Encrypt("") would churn the JSON on every save and
+        // still round-trip back through this branch (IsEncrypted("") is false).
+        var token = value.SuppliedAtRuntime || string.IsNullOrWhiteSpace(value.ConnectionString)
+            ? string.Empty
+            : cipher.IsEncrypted(value.ConnectionString)
+                ? value.ConnectionString
+                : cipher.Encrypt(value.ConnectionString);
 
         writer.WriteStartObject();
         writer.WriteString("name", value.Name);
         writer.WriteString("provider", value.Provider.ToString());
+        if (value.SuppliedAtRuntime)
+            writer.WriteBoolean("suppliedAtRuntime", true);
         writer.WriteString("connectionString", token);
         writer.WriteEndObject();
     }

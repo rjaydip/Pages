@@ -130,8 +130,12 @@ and the host overrides them at generation time — a natural fit for URL query v
 ```csharp
 var values = new Dictionary<string, string?> { ["minRevenue"] = "5000" }; // e.g. from the URL
 <ReportView Json="@json" Parameters="values" />
-byte[] pdf = await pdfExporter.ExportAsync(json, parameters: values);
+byte[] pdf = await pdfExporter.ExportAsync(json, new ReportRuntimeOptions { Parameters = values });
 ```
+
+`GenerateAsync` and the `ExportAsync` overloads take a single `ReportRuntimeOptions` — it
+carries `Parameters` and (below) `ConnectionStrings`. `<ReportView>` keeps the discrete
+`Parameters` / `ConnectionStrings` parameters and builds the options object for you.
 
 For a UI rather than a hard-coded dictionary, drop in the unstyled `<ReportParameters>`
 component. It renders one input per declared parameter, seeded from the defaults, and raises the
@@ -150,8 +154,9 @@ The page (or this component) needs an interactive render mode, e.g. `@rendermode
 it applies values through `@onchange`/`@onsubmit` handlers rather than a form post, and those do
 nothing under static SSR.
 
-Only declared parameters are applied (unknown names are ignored), and a parameter is bound to
-a query only when its `@name` appears in that SQL.
+Only declared parameters are applied (unknown names are ignored), names are matched
+case-insensitively, and a parameter is bound to a query only when its `@name` appears in that
+SQL.
 
 ### Numbers vs. zero-padded codes
 
@@ -184,3 +189,43 @@ AES-256-GCM. The key is resolved in order:
 Reports encrypted with one key can only be generated where that key is available. Supported
 databases — **SQL Server, SQLite, PostgreSQL, MySQL** — ship with the library; consuming apps
 install no ADO.NET packages.
+
+## Connections at runtime
+
+A connection can be left out of the report and supplied at generation time instead — the way
+parameters are — so one definition runs against dev, staging and production, or against a
+per-tenant database, without duplicating the JSON.
+
+Mark the connection `suppliedAtRuntime` (the designer has a checkbox, *"Supplied at generation
+time"*). Its `connectionString` is then stored empty; the **provider stays in the report**:
+
+```json
+"connections": [
+  { "name": "sales", "provider": "PostgreSql", "suppliedAtRuntime": true, "connectionString": "" }
+]
+```
+
+Pass the string at generation time, keyed by connection name:
+
+```csharp
+var conns = new Dictionary<string, string?> { ["sales"] = "Host=db.internal;Database=acme;Username=…;Password=…" };
+<ReportView Json="@json" ConnectionStrings="conns" />
+byte[] pdf = await pdfExporter.ExportAsync(json, new ReportRuntimeOptions { ConnectionStrings = conns });
+```
+
+- Keys are connection names, matched **case-insensitively**. Only connections marked
+  `suppliedAtRuntime` read from the map; any other key is ignored, and a runtime value can
+  never redirect a connection whose string is stored.
+- The value is used **as-is** — the provider comes from the report's connection definition,
+  not the string.
+- If a `suppliedAtRuntime` connection gets no value (or an empty one), the report renders with
+  a banner: *"Connection 'sales' must be supplied at generation time."*
+- The supplied string lives in memory for that one generation only. It is never written to the
+  report JSON and never exposed on `ResolvedReport`. Read it from configuration or a secret
+  store — **never from a query string or other client input.**
+- `<ReportView Resolved="…">` is already resolved, so it ignores `ConnectionStrings`; the
+  designer's own preview and column discovery always use the authored connection.
+
+One report definition run across many tenants opens one ADO.NET connection pool per distinct
+connection string. At high tenant counts, tune pooling (`Max Pool Size`, `Pooling=false`) or
+reuse strings deliberately.

@@ -46,7 +46,11 @@
                                       Values="_previewParameters"
                                       ValuesChanged="ApplyPreviewParameters" />
                 </div>
-                @* Same paper sheet as the canvas; ReportView applies the page Style itself. *@
+                @* Same paper sheet as the canvas; ReportView applies the page Style itself.
+                   ConnectionStrings is deliberately not passed: the designer previews the
+                   report as authored, so a connection marked "supplied at generation time"
+                   shows its "must be supplied" banner here rather than silently reading a
+                   runtime value the finished report would get. *@
                 <div class="rd-page" style="@SheetCss()">
                     <ReportView Report="_report" Parameters="_previewParameters" @key="_previewVersion" />
                 </div>

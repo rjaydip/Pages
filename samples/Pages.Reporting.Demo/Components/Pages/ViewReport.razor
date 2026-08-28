@@ -4,6 +4,7 @@
    /pdf-inline endpoint the iframe loads, so the browser shows its own progress and streams
    the PDF itself. No [StreamRendering] needed: this component resolves nothing slow. *@
 @using global::Pages.Reporting.Core.Serialization
+@using Microsoft.AspNetCore.WebUtilities
 @inject ReportRepository Reports
 @inject NavigationManager Nav
 
@@ -17,6 +18,10 @@ else
 {
     <div class="demo-toolbar">
         <a class="demo-button" href="/">← All reports</a>
+        @* Points a report's runtime-supplied "sales" connection at either database. The
+           connection string lives server-side; only the environment name is in the URL. *@
+        <a class="demo-button @(IsStaging ? null : "primary")" href="@($"/reports/{Id}{QueryFor(null)}")">Production</a>
+        <a class="demo-button @(IsStaging ? "primary" : null)" href="@($"/reports/{Id}{QueryFor("staging")}")">Staging</a>
         <span class="spacer"></span>
         <a class="demo-button" href="/reports/@Id/designer">Open in designer</a>
         <a class="demo-button" href="/reports/@Id/builder">Open in builder</a>
@@ -41,5 +46,21 @@ else
     {
         _report = Reports.Get(Id);
         _query = new Uri(Nav.Uri).Query;
+    }
+
+    private bool IsStaging =>
+        QueryHelpers.ParseQuery(_query).TryGetValue("env", out var env)
+        && string.Equals(env.ToString(), "staging", StringComparison.OrdinalIgnoreCase);
+
+    // Rewrites just the env parameter, keeping any others (e.g. ?minRevenue=5000).
+    private string QueryFor(string? env)
+    {
+        var values = QueryHelpers.ParseQuery(_query)
+            .ToDictionary(kv => kv.Key, kv => (string?)kv.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+        if (env is null)
+            values.Remove("env");
+        else
+            values["env"] = env;
+        return values.Count == 0 ? string.Empty : QueryHelpers.AddQueryString(string.Empty, values);
     }
 }

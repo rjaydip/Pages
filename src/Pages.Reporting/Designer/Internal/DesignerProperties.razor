@@ -36,14 +36,7 @@
     {
         <h3 class="rd-props-head">Connection</h3>
         <label class="rd-field"><span>Name (data sets reference this)</span><input @bind="connection.Name" @bind:after="NotifyChanged" /></label>
-        @if (_connectionLocked)
-        {
-            <div class="rd-locked">
-                🔒 Saved &amp; encrypted — the stored details keep working. Replace them to make changes.
-            </div>
-            <button type="button" class="rd-load" @onclick="() => ReplaceConnection(connection)">Replace connection details…</button>
-        }
-        else
+        @if (!_connectionLocked)
         {
             <label class="rd-field">
                 <span>Provider</span>
@@ -54,6 +47,28 @@
                     <option value="@DatabaseProvider.MySql">MySQL</option>
                 </select>
             </label>
+            <label class="rd-check">
+                <input type="checkbox" @bind="connection.SuppliedAtRuntime" @bind:after="() => SuppliedAtRuntimeChanged(connection)" />
+                Supplied at generation time (per environment / per tenant)
+            </label>
+        }
+        @if (connection.SuppliedAtRuntime)
+        {
+            <p class="rd-hint">
+                No connection string is stored. Pass one at generation time in
+                <code>ReportRuntimeOptions.ConnectionStrings["@connection.Name"]</code> —
+                the provider above still applies.
+            </p>
+        }
+        else if (_connectionLocked)
+        {
+            <div class="rd-locked">
+                🔒 Saved &amp; encrypted — the stored details keep working. Replace them to make changes.
+            </div>
+            <button type="button" class="rd-load" @onclick="() => ReplaceConnection(connection)">Replace connection details…</button>
+        }
+        else
+        {
             @if (connection.Provider == DatabaseProvider.Sqlite)
             {
                 <label class="rd-field">
@@ -116,21 +131,24 @@
                 <p class="rd-hint">Built from the fields above; edit here for options the form doesn't cover.</p>
             </details>
         }
-        <button type="button" class="rd-load" disabled="@_testingConnection" @onclick="() => TestConnection(connection)">
-            @(_testingConnection ? "Testing…" : "Test connection")
-        </button>
-        @if (_connectionTest is { } test)
+        @if (!connection.SuppliedAtRuntime)
         {
-            @if (test.Ok)
+            <button type="button" class="rd-load" disabled="@_testingConnection" @onclick="() => TestConnection(connection)">
+                @(_testingConnection ? "Testing…" : "Test connection")
+            </button>
+            @if (_connectionTest is { } test)
             {
-                <p class="rd-ok">✓ Connection works.</p>
+                @if (test.Ok)
+                {
+                    <p class="rd-ok">✓ Connection works.</p>
+                }
+                else
+                {
+                    <p class="rd-error">@test.Message</p>
+                }
             }
-            else
-            {
-                <p class="rd-error">@test.Message</p>
-            }
+            <p class="rd-hint">Encrypted when the report is saved (<code>enc:v1:…</code>), so the JSON is safe to store anywhere.</p>
         }
-        <p class="rd-hint">Encrypted when the report is saved (<code>enc:v1:…</code>), so the JSON is safe to store anywhere.</p>
         <button type="button" class="rd-remove" @onclick="() => OnRemoveItem.InvokeAsync(connection)">Remove connection</button>
     }
     else if (Selection is DataSetDefinition dataSet)
@@ -148,7 +166,9 @@
                     }
                     @foreach (var candidate in Report.Connections)
                     {
-                        <option value="@candidate.Name">@candidate.Name (@candidate.Provider)</option>
+                        <option value="@candidate.Name">
+                            @candidate.Name (@candidate.Provider)@(candidate.SuppliedAtRuntime ? " — supplied at runtime" : "")
+                        </option>
                     }
                 </select>
             </label>
@@ -552,8 +572,10 @@
         _showPassword = false;
         if (Selection is ConnectionDefinition connection)
         {
-            _connectionLocked = Cipher.IsEncrypted(connection.ConnectionString);
-            _connection = _connectionLocked ? new() : ConnectionFields.Parse(connection.Provider, connection.ConnectionString);
+            _connectionLocked = !connection.SuppliedAtRuntime && Cipher.IsEncrypted(connection.ConnectionString);
+            _connection = _connectionLocked || connection.SuppliedAtRuntime
+                ? new()
+                : ConnectionFields.Parse(connection.Provider, connection.ConnectionString);
         }
     }
 
@@ -568,7 +590,26 @@
     /// <summary>A form field changed: rebuild the connection string from the fields.</summary>
     private async Task ConnectionFieldChanged(ConnectionDefinition connection)
     {
-        connection.ConnectionString = _connection.Build(connection.Provider);
+        // A runtime-supplied connection stores no string — only the provider matters here.
+        if (!connection.SuppliedAtRuntime)
+            connection.ConnectionString = _connection.Build(connection.Provider);
+        _connectionTest = null;
+        await NotifyChanged();
+    }
+
+    /// <summary>The "supplied at generation time" toggle flipped.</summary>
+    private async Task SuppliedAtRuntimeChanged(ConnectionDefinition connection)
+    {
+        if (connection.SuppliedAtRuntime)
+        {
+            connection.ConnectionString = string.Empty;
+            _connection = new();
+            _connectionLocked = false;
+        }
+        else
+        {
+            _connection = ConnectionFields.Parse(connection.Provider, connection.ConnectionString);
+        }
         _connectionTest = null;
         await NotifyChanged();
     }

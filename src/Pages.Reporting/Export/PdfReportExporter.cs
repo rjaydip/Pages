@@ -22,14 +22,14 @@ public sealed class PdfReportExporter(
     /// <summary>
     /// Generates the report from its stored JSON and returns the PDF as bytes.
     /// <paramref name="css"/> overrides the CSS configured in <see cref="ReportExportOptions"/>;
-    /// <paramref name="parameters"/> overrides the report's parameter defaults.
+    /// <paramref name="options"/> carries parameter overrides and runtime connection strings.
     /// </summary>
     public async Task<byte[]> ExportAsync(
         string reportJson,
         string? css = null,
-        IReadOnlyDictionary<string, string?>? parameters = null,
+        ReportRuntimeOptions? options = null,
         CancellationToken cancellationToken = default) =>
-        await ExportAsync(await generator.GenerateAsync(reportJson, parameters, cancellationToken), css, cancellationToken);
+        await ExportAsync(await generator.GenerateAsync(reportJson, options, cancellationToken), css, cancellationToken);
 
     public async Task<byte[]> ExportAsync(ResolvedReport report, string? css = null, CancellationToken cancellationToken = default)
     {

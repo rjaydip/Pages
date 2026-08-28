@@ -14,7 +14,7 @@ additive — no model removals — but `0.x` minor bumps may still carry a break
 
 Planned scope (tick as it lands):
 
-- [ ] **Connection strings supplied at runtime** — pass a connection at generation time, the
+- [x] **Connection strings supplied at runtime** — pass a connection at generation time, the
   way parameters already are, so one definition runs against dev / staging / prod or a
   per-tenant database.
 - [ ] **Typed parameters** — a type on `ParameterDefinition` (number, date, boolean, list of
@@ -26,15 +26,34 @@ Planned scope (tick as it lands):
 
 ### Added
 
-_Nothing yet._
+- **Connection strings supplied at runtime.** A connection can be marked
+  `suppliedAtRuntime` (`ConnectionDefinition.SuppliedAtRuntime`, a checkbox in the designer):
+  its string is not stored, and the caller passes one at generation time. One definition then
+  runs against dev/staging/prod or a per-tenant database without duplicating the JSON. Keyed by
+  connection name (case-insensitive); the provider stays in the report; a missing value renders
+  a *"must be supplied at generation time"* banner. Never persisted, never exposed on
+  `ResolvedReport`.
+- **`ReportRuntimeOptions`** — the single object carrying everything supplied at generation
+  time (`Parameters`, `ConnectionStrings`). Passed to `IReportGenerator.GenerateAsync`,
+  `PdfReportExporter.ExportAsync` and `ExcelReportExporter.ExportAsync`. `<ReportView>` gains a
+  matching `ConnectionStrings` parameter alongside `Parameters`.
 
 ### Changed
 
-_Nothing yet._
+- **`GenerateAsync` / `ExportAsync` / `ResolveAsync` now take `ReportRuntimeOptions? options`
+  in place of `IReadOnlyDictionary<string,string?>? parameters`.** Migration: wrap the map,
+  `ExportAsync(json, parameters: v)` → `ExportAsync(json, new ReportRuntimeOptions { Parameters = v })`.
+  **Recompile required**; a custom `IReportGenerator` implementation must update its signature.
+- **Connection-failure banners no longer include the provider's message** (it can carry the
+  connection string). They now read *"Could not connect to '{name}'."*; the full exception is
+  logged server-side at Warning. `Pages.Reporting` now depends on
+  `Microsoft.Extensions.Logging.Abstractions`.
+- A blank connection string serialises as `""` rather than an encrypted empty token.
 
 ### Fixed
 
-_Nothing yet._
+- **Runtime parameter names are now matched case-insensitively** — `?MinRevenue=5000` reached a
+  report declaring `@minRevenue` as an unmatched key and silently did nothing.
 
 ## 0.2.1 — 2026-08-09
 

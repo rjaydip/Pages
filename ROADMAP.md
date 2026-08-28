@@ -22,6 +22,9 @@ Worth stating, so nothing here is rebuilt by accident:
   `<thead>` that Chromium repeats on every printed page.
 - Charts cover **bar, line and pie**. Report **parameters with defaults**, overridable at
   generation time. An **SVG designer** showing bands to scale.
+- **Connection strings supplied at runtime** — a connection marked `suppliedAtRuntime` takes
+  its string from `ReportRuntimeOptions.ConnectionStrings` at generation time, so one
+  definition runs against dev/staging/prod or a per-tenant database *(0.3.0)*.
 - Everything in **one package** (`Pages.Reporting`), PDF via Chromium and Excel via ClosedXML.
 
 ## Planned
@@ -33,7 +36,7 @@ Ordered by how much it is asked for and how central it is to real reporting work
 |---|---|---|
 | 1 | Conditional / per-column table formatting | Tables |
 | 2 | Adjustable column widths + row/header heights | Tables |
-| 3 | Connection strings supplied at runtime | Data |
+| ~~3~~ | ~~Connection strings supplied at runtime~~ — shipped 0.3.0 | Data |
 | 4 | `ImageElement` (static + per-row) | Content |
 | 5 | Typed parameters | Data |
 | 6 | Culture-aware formatting | Tables |
@@ -60,10 +63,10 @@ Ordered by how much it is asked for and how central it is to real reporting work
 
 ### Data
 
-- **Connection strings supplied at runtime** *(priority 3)*. Today a connection lives encrypted in
-  the report JSON. Passing one at generation time — the way parameters already are — lets one
-  report run against dev, staging and production, or against a per-tenant database, without
-  duplicating the definition.
+- ~~**Connection strings supplied at runtime** *(priority 3)*~~ — **shipped 0.3.0.** A connection
+  marked `suppliedAtRuntime` takes its string from `ReportRuntimeOptions.ConnectionStrings` at
+  generation time, so one definition runs against dev, staging and production, or a per-tenant
+  database, without duplicating it. See [the report definition](report-definition.md#connections-at-runtime).
 - **Typed parameters** *(priority 5)*. `ParameterDefinition` is a name and a string default. A
   type (number, date, boolean, or a list of allowed values) would drive real inputs in
   `<ReportParameters>` instead of a text box, and let the designer validate before running a
@@ -106,8 +109,8 @@ Ordered by how much it is asked for and how central it is to real reporting work
 How the planned work is expected to land. Themed so a release is coherent rather than one item
 from each group; order and contents move with demand.
 
-- **0.3.0 — "Data at runtime"** — connection strings supplied at generation time (3), typed
-  parameters (5), and more runtime variables and functions (8). Mostly additive.
+- **0.3.0 — "Data at runtime"** — connection strings supplied at generation time (3, **done**),
+  typed parameters (5), and more runtime variables and functions (8). Mostly additive.
 - **0.4.0 — "Tables"** — conditional and per-column formatting (1), column widths and row/header
   heights (2), culture-aware formatting (6). The heaviest group, so it gets its own release.
 - **0.5.0 — "Content & output"** — `ImageElement` (4), barcodes and QR codes (10), CSV and HTML

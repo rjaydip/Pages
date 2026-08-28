@@ -7,13 +7,13 @@ public sealed class ReportGenerator(ReportJson json, ReportDataResolver resolver
 {
     public Task<ResolvedReport> GenerateAsync(
         string reportJson,
-        IReadOnlyDictionary<string, string?>? parameters = null,
+        ReportRuntimeOptions? options = null,
         CancellationToken cancellationToken = default) =>
-        GenerateAsync(json.Deserialize(reportJson), parameters, cancellationToken);
+        GenerateAsync(json.Deserialize(reportJson), options, cancellationToken);
 
     public Task<ResolvedReport> GenerateAsync(
         Report report,
-        IReadOnlyDictionary<string, string?>? parameters = null,
+        ReportRuntimeOptions? options = null,
         CancellationToken cancellationToken = default) =>
-        resolver.ResolveAsync(report, parameters, cancellationToken);
+        resolver.ResolveAsync(report, options, cancellationToken);
 }

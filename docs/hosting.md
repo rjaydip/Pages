@@ -26,6 +26,11 @@ project with `@rendermode InteractiveServer`; the rest of the app is unaffected.
 `<ReportParameters>` applies its values through event handlers rather than a form post, so it
 also needs an interactive render mode.
 
+Parameter values and runtime connection strings (see
+[the report definition](report-definition.md#connections-at-runtime)) are both supplied at
+generation time. Take them from server configuration or a secret store — never from a query
+string or other client-supplied input.
+
 ## Chromium, for PDF export
 
 PDF export prints through Playwright's Chromium — a ~150 MB browser download, once. Nothing extra

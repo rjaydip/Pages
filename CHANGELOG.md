@@ -6,9 +6,35 @@ Versions are `0.x` deliberately: until `1.0` a minor bump may carry a breaking c
 `<Version>` in `src/Pages.Reporting/Pages.Reporting.csproj` is the source of truth for the
 number — see [docs/releasing.md](docs/releasing.md) for how a release is cut.
 
-## Unreleased
+## 0.3.0 — unreleased
 
-Nothing yet. What is planned is in [ROADMAP.md](ROADMAP.md) — this file records what shipped.
+**In progress.** The "Data at runtime" theme from [ROADMAP.md](ROADMAP.md): supplying a
+report's inputs at generation time rather than baking them into the JSON. Expected to be
+additive — no model removals — but `0.x` minor bumps may still carry a breaking change.
+
+Planned scope (tick as it lands):
+
+- [ ] **Connection strings supplied at runtime** — pass a connection at generation time, the
+  way parameters already are, so one definition runs against dev / staging / prod or a
+  per-tenant database.
+- [ ] **Typed parameters** — a type on `ParameterDefinition` (number, date, boolean, list of
+  allowed values) driving real inputs in `<ReportParameters>` and letting the designer
+  validate before a query runs.
+- [ ] **More runtime variables and functions** — built-ins beyond page numbers (today's
+  date, user name, row index, running totals) and expression functions in text templates
+  (arithmetic, string, conditional, date maths).
+
+### Added
+
+_Nothing yet._
+
+### Changed
+
+_Nothing yet._
+
+### Fixed
+
+_Nothing yet._
 
 ## 0.2.1 — 2026-08-09
 

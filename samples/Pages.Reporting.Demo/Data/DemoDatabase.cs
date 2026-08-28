@@ -15,7 +15,17 @@ public static class DemoDatabase
 {
     public static string GetDbPath(IWebHostEnvironment env) => Path.Combine(env.ContentRootPath, "demo.db");
 
-    public static void Initialize(string dbPath)
+    /// <summary>
+    /// A second database with the same shape but different sales figures, so the
+    /// "connection strings supplied at runtime" feature has somewhere visibly different to
+    /// point at. A report whose connection is marked <c>SuppliedAtRuntime</c> and named
+    /// <c>sales</c> renders against this when the endpoints are hit with <c>?env=staging</c>.
+    /// </summary>
+    public static string GetStagingDbPath(IWebHostEnvironment env) => Path.Combine(env.ContentRootPath, "demo-staging.db");
+
+    public static void Initialize(string dbPath) => Initialize(dbPath, seed: 42);
+
+    public static void Initialize(string dbPath, int seed)
     {
         using var connection = new SqliteConnection($"Data Source={dbPath}");
         connection.Open();
@@ -37,10 +47,10 @@ public static class DemoDatabase
             );
             """);
 
-        SeedSales(connection);
+        SeedSales(connection, seed);
     }
 
-    private static void SeedSales(SqliteConnection connection)
+    private static void SeedSales(SqliteConnection connection, int seed)
     {
         if (Scalar<long>(connection, "SELECT COUNT(*) FROM Sales") > 0)
             return;
@@ -48,7 +58,7 @@ public static class DemoDatabase
         string[] regions = ["North", "South", "East", "West"];
         string[] products = ["Standard", "Pro", "Enterprise"];
         decimal[] unitPrices = [49m, 129m, 399m];
-        var random = new Random(42); // deterministic demo data
+        var random = new Random(seed); // deterministic demo data
 
         using var transaction = connection.BeginTransaction();
         using var command = connection.CreateCommand();

@@ -94,6 +94,14 @@
     /// <summary>Runtime values overriding the report's parameter defaults (e.g. from the page URL).</summary>
     [Parameter] public IReadOnlyDictionary<string, string?>? Parameters { get; set; }
 
+    /// <summary>
+    /// Connection strings supplied at generation time, keyed by connection name
+    /// (case-insensitive). Only connections the report marks <c>SuppliedAtRuntime</c> read from
+    /// here. Applies to the <see cref="Json"/> / <see cref="Report"/> paths only — a
+    /// <see cref="Resolved"/> report is already fetched and ignores it.
+    /// </summary>
+    [Parameter] public IReadOnlyDictionary<string, string?>? ConnectionStrings { get; set; }
+
     // The root is a flex column so bands can sit above and below the body, and a report
     // summary that is genuinely the last band can take margin-top:auto to reach the bottom
     // edge. There is no body-level grid any more — each band is its own free canvas
@@ -188,6 +196,7 @@
     private string? _error;
     private object? _lastSource;
     private IReadOnlyDictionary<string, string?>? _lastParameters;
+    private IReadOnlyDictionary<string, string?>? _lastConnectionStrings;
 
     // Cancels the resolution that is still running when the parameters change again or the
     // component goes away. ReportDataResolver holds every DbConnection open for the whole
@@ -205,11 +214,14 @@
         var source = (object?)Resolved ?? (object?)Report ?? Json;
         var sameSource = ReferenceEquals(source, _lastSource)
             || (source is string s && _lastSource is string last && s == last);
-        if (sameSource && SameParameters(Parameters, _lastParameters))
+        if (sameSource
+            && SameMap(Parameters, _lastParameters)
+            && SameMap(ConnectionStrings, _lastConnectionStrings))
             return;
 
         _lastSource = source;
         _lastParameters = Parameters;
+        _lastConnectionStrings = ConnectionStrings;
         _error = null;
         _resolved = null;
 
@@ -229,9 +241,12 @@
         var cts = _cts = new CancellationTokenSource();
         try
         {
+            var options = Parameters is null && ConnectionStrings is null
+                ? null
+                : new ReportRuntimeOptions { Parameters = Parameters, ConnectionStrings = ConnectionStrings };
             var resolved = Report is not null
-                ? await Generator.GenerateAsync(Report, Parameters, cts.Token)
-                : await Generator.GenerateAsync(Json!, Parameters, cts.Token);
+                ? await Generator.GenerateAsync(Report, options, cts.Token)
+                : await Generator.GenerateAsync(Json!, options, cts.Token);
             if (generation == _generation)
                 _resolved = resolved;
         }
@@ -258,9 +273,9 @@
 
     // Reference equality alone re-resolves the whole report whenever a caller rebuilds an
     // equivalent map on each render — a page projecting the query string into a fresh
-    // dictionary does exactly that. Parameter maps hold a handful of entries, so comparing
+    // dictionary does exactly that. These maps hold a handful of entries, so comparing
     // them is far cheaper than re-running the queries.
-    private static bool SameParameters(
+    private static bool SameMap(
         IReadOnlyDictionary<string, string?>? left,
         IReadOnlyDictionary<string, string?>? right)
     {

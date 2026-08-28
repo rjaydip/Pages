@@ -1,4 +1,5 @@
 using Pages.Reporting.Core.DependencyInjection;
+using Pages.Reporting.Core.Rendering;
 using Pages.Reporting.Core.Serialization;
 using Pages.Reporting.Demo.Components;
 using Pages.Reporting.Demo.Data;
@@ -18,12 +19,16 @@ builder.Services.AddPagesReportingExport(options =>
     options.Css = File.ReadAllText(Path.Combine(builder.Environment.WebRootPath, "report.css")));
 
 // Demo-side storage of report JSON (the "caller" role).
-var dbPath = Path.Combine(builder.Environment.ContentRootPath, "demo.db");
+var dbPath = DemoDatabase.GetDbPath(builder.Environment);
+var stagingDbPath = DemoDatabase.GetStagingDbPath(builder.Environment);
 builder.Services.AddSingleton(new ReportRepository(dbPath));
 
 var app = builder.Build();
 
 DemoDatabase.Initialize(dbPath);
+// A second database with different figures, so a report marked "supplied at runtime" has
+// somewhere else to point — see EnvConnections below and docs/report-definition.md.
+DemoDatabase.Initialize(stagingDbPath, seed: 7);
 
 if (!app.Environment.IsDevelopment())
 {
@@ -40,17 +45,31 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 // Export endpoints: the stored JSON goes in, PDF/Excel bytes come out. Request query
-// values (?minRevenue=5000) override the report's parameter defaults.
+// values (?minRevenue=5000) override the report's parameter defaults; ?env=staging points a
+// report's runtime-supplied "sales" connection at the second database.
+ReportRuntimeOptions RuntimeOptions(HttpRequest request) => new()
+{
+    Parameters = QueryParameters(request),
+    ConnectionStrings = EnvConnections(request),
+};
+
 static Dictionary<string, string?>? QueryParameters(HttpRequest request) =>
     request.Query.Count == 0
         ? null
-        : request.Query.ToDictionary(kv => kv.Key, kv => (string?)kv.Value.ToString());
+        : request.Query.ToDictionary(kv => kv.Key, kv => (string?)kv.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+
+// A fixed, server-side map — the connection string never comes from the client, only the
+// environment name does. A real app would read these from configuration or a secret store.
+Dictionary<string, string?>? EnvConnections(HttpRequest request) =>
+    string.Equals(request.Query["env"], "staging", StringComparison.OrdinalIgnoreCase)
+        ? new() { ["sales"] = $"Data Source={stagingDbPath}" }
+        : null;
 
 app.MapGet("/api/reports/{id:int}/pdf", async (int id, HttpRequest request, ReportRepository reports, PdfReportExporter exporter, CancellationToken ct) =>
 {
     if (reports.Get(id) is not { } report)
         return Results.NotFound();
-    byte[] pdf = await exporter.ExportAsync(report.Json, parameters: QueryParameters(request), cancellationToken: ct);
+    byte[] pdf = await exporter.ExportAsync(report.Json, options: RuntimeOptions(request), cancellationToken: ct);
     return Results.File(pdf, "application/pdf", $"{report.Name}.pdf");
 });
 
@@ -62,7 +81,7 @@ app.MapGet("/api/reports/{id:int}/pdf-inline", async (int id, HttpRequest reques
 {
     if (reports.Get(id) is not { } report)
         return Results.NotFound();
-    byte[] pdf = await exporter.ExportAsync(report.Json, parameters: QueryParameters(request), cancellationToken: ct);
+    byte[] pdf = await exporter.ExportAsync(report.Json, options: RuntimeOptions(request), cancellationToken: ct);
     return Results.File(pdf, "application/pdf");
 });
 
@@ -70,7 +89,7 @@ app.MapGet("/api/reports/{id:int}/xlsx", async (int id, HttpRequest request, Rep
 {
     if (reports.Get(id) is not { } report)
         return Results.NotFound();
-    byte[] workbook = await exporter.ExportAsync(report.Json, QueryParameters(request), ct);
+    byte[] workbook = await exporter.ExportAsync(report.Json, RuntimeOptions(request), ct);
     return Results.File(workbook, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"{report.Name}.xlsx");
 });
 

@@ -50,7 +50,10 @@ public sealed class ResolvedReport
 
 /// <summary>A named connection that failed to open, and why.</summary>
 /// <param name="Connection">The connection name as declared in the report.</param>
-/// <param name="Message">The provider's failure message.</param>
+/// <param name="Message">
+/// A safe, reader-facing summary — the connection name, not the provider's message, which can
+/// carry the connection string. The provider detail is logged server-side instead.
+/// </param>
 public sealed record ConnectionFailure(string Connection, string Message);
 
 /// <summary>Data fetched for one element: a scalar, a table, or a per-element error.</summary>

@@ -13,13 +13,13 @@ public sealed class ExcelReportExporter(IReportGenerator generator)
 {
     /// <summary>
     /// Generates the report from its stored JSON and returns the .xlsx as bytes.
-    /// <paramref name="parameters"/> overrides the report's parameter defaults.
+    /// <paramref name="options"/> carries parameter overrides and runtime connection strings.
     /// </summary>
     public async Task<byte[]> ExportAsync(
         string reportJson,
-        IReadOnlyDictionary<string, string?>? parameters = null,
+        ReportRuntimeOptions? options = null,
         CancellationToken cancellationToken = default) =>
-        Export(await generator.GenerateAsync(reportJson, parameters, cancellationToken));
+        Export(await generator.GenerateAsync(reportJson, options, cancellationToken));
 
     public byte[] Export(ResolvedReport report)
     {

@@ -23,9 +23,12 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
         // a text element inside a group band, which is re-rendered per group at render time.
         var generatedAt = DateTime.Now;
         var data = new Dictionary<ReportElement, ResolvedData>();
+        var parameters = EffectiveParameters(report, options?.Parameters);
         var context = new ResolveContext(
             report.Name,
-            EffectiveParameters(report, options?.Parameters),
+            parameters.Values,
+            parameters.Types,
+            parameters.Invalid,
             EffectiveConnectionStrings(report, options?.ConnectionStrings),
             generatedAt);
 
@@ -85,7 +88,7 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
 
         return new ResolvedReport(
             report, data, context.Failures(), context.DataSets,
-            context.ParameterValues, generatedAt);
+            context.ParameterValues, generatedAt, parameters.Problems);
     }
 
     /// <summary>
@@ -96,10 +99,14 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
         Report report, DataBinding binding, CancellationToken cancellationToken = default)
     {
         // designer/discovery: parameter defaults apply, and connections are always the
-        // authored ones — there is no runtime channel here.
+        // authored ones — there is no runtime channel here. A default that doesn't match its
+        // type just binds NULL here; the designer surfaces that separately (ParameterChecks).
+        var parameters = EffectiveParameters(report, overrides: null);
         var context = new ResolveContext(
             report.Name,
-            EffectiveParameters(report, overrides: null),
+            parameters.Values,
+            parameters.Types,
+            parameters.Invalid,
             EffectiveConnectionStrings(report, overrides: null),
             DateTime.Now);
         try
@@ -199,7 +206,7 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
                 continue;
             var parameter = command.CreateParameter();
             parameter.ParameterName = name;
-            parameter.Value = ToDbValue(value);
+            parameter.Value = BindParameter(name, value, context);
             command.Parameters.Add(parameter);
         }
 
@@ -220,21 +227,102 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
         return new ResolvedData { Table = new ReportDataTable(columns, rows) };
     }
 
-    /// <summary>Declared defaults overridden by host-supplied values (undeclared names are ignored).</summary>
-    private static Dictionary<string, string?> EffectiveParameters(
+    /// <summary>
+    /// The per-name effective parameter state for one resolution. <see cref="Values"/> holds
+    /// the canonical string for a valid typed value, the raw string otherwise; <see cref="Types"/>
+    /// records the type of a valid typed value (so SQL binding can convert it);
+    /// <see cref="Invalid"/> names typed values that failed to parse (bound as NULL);
+    /// <see cref="Problems"/> is the reader-facing explanation for each.
+    /// </summary>
+    private sealed record ParameterResolution(
+        Dictionary<string, string?> Values,
+        Dictionary<string, ParameterType> Types,
+        HashSet<string> Invalid,
+        IReadOnlyList<ParameterProblem> Problems);
+
+    /// <summary>
+    /// Declared defaults overridden by host-supplied values (undeclared names are ignored). A
+    /// declared type is parsed here: a valid value is canonicalised (so <c>{@name}</c> and SQL
+    /// binding agree), an invalid one keeps its raw string for display but is recorded so it
+    /// binds NULL and shows a banner.
+    /// </summary>
+    private static ParameterResolution EffectiveParameters(
         Report report, IReadOnlyDictionary<string, string?>? overrides)
     {
         var supplied = NormalizeKeys(overrides);
         var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var types = new Dictionary<string, ParameterType>(StringComparer.OrdinalIgnoreCase);
+        var invalid = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var problems = new List<ParameterProblem>();
+
         foreach (var parameter in report.Parameters)
         {
             if (string.IsNullOrWhiteSpace(parameter.Name))
                 continue;
             var name = parameter.Name.TrimStart('@');
-            values[name] = supplied.TryGetValue(name, out var value) ? value : parameter.DefaultValue;
+            var raw = supplied.TryGetValue(name, out var value) ? value : parameter.DefaultValue;
+
+            if (parameter.Type is ParameterType.Text)
+            {
+                values[name] = raw;
+                continue;
+            }
+
+            var parsed = ParameterParsing.TryParse(raw, parameter.Type, parameter.AllowedValues);
+            if (!parsed.Valid)
+            {
+                values[name] = raw;   // {@name} shows what was passed
+                invalid.Add(name);
+                problems.Add(new ParameterProblem(name, DescribeInvalidParameter(name, raw, parameter.Type)));
+            }
+            else if (parsed.Canonical is { } canonical)
+            {
+                values[name] = canonical;
+                types[name] = parameter.Type;
+            }
+            else
+            {
+                values[name] = raw;   // null/empty — the resolver already applied the default
+            }
         }
-        return values;
+
+        return new ParameterResolution(values, types, invalid, problems);
     }
+
+    private static string DescribeInvalidParameter(string name, string? raw, ParameterType type) => type switch
+    {
+        ParameterType.Number => $"Parameter '{name}' = '{raw}' is not a valid number — filtered as NULL.",
+        ParameterType.Date => $"Parameter '{name}' = '{raw}' is not a valid date (expected YYYY-MM-DD) — filtered as NULL.",
+        ParameterType.Boolean => $"Parameter '{name}' = '{raw}' is not true/false or 1/0 — filtered as NULL.",
+        ParameterType.List => $"Parameter '{name}' = '{raw}' is not one of the allowed values — filtered as NULL.",
+        _ => $"Parameter '{name}' = '{raw}' is not valid — filtered as NULL.",
+    };
+
+    /// <summary>
+    /// Turns a parameter's effective value into the CLR value bound to a data set's SQL. A
+    /// valid <c>number</c>/<c>boolean</c> becomes its CLR type; a <c>date</c> stays the
+    /// canonical ISO string (every provider converts it for a date column); an invalid typed
+    /// value binds NULL; everything else keeps the <see cref="ToDbValue"/> string heuristic.
+    /// </summary>
+    private static object BindParameter(string name, string? canonical, ResolveContext context)
+    {
+        if (context.InvalidTypedParameters.Contains(name))
+            return DBNull.Value;
+
+        return context.ParameterTypes.GetValueOrDefault(name) switch
+        {
+            ParameterType.Number => NumberDbValue(canonical!),
+            ParameterType.Boolean => canonical == "1" ? 1L : 0L,   // canonical is "1" / "0"
+            ParameterType.Date => canonical!,
+            _ => ToDbValue(canonical),
+        };
+    }
+
+    /// <summary>A canonical number string (produced by <c>ParameterParsing</c>) as long or decimal.</summary>
+    private static object NumberDbValue(string canonical) =>
+        long.TryParse(canonical, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var integer)
+            ? integer
+            : decimal.Parse(canonical, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Runtime connection-string overrides, for declared connections marked
@@ -448,6 +536,8 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
     private sealed class ResolveContext(
         string reportName,
         Dictionary<string, string?> parameterValues,
+        Dictionary<string, ParameterType> parameterTypes,
+        HashSet<string> invalidTypedParameters,
         Dictionary<string, string?> connectionOverrides,
         DateTime generatedAt)
     {
@@ -463,6 +553,12 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
         public Dictionary<string, string?> ConnectionOverrides { get; } = connectionOverrides;
 
         public Dictionary<string, string?> ParameterValues { get; } = parameterValues;
+
+        /// <summary>Declared type of each valid typed parameter — drives SQL binding conversion.</summary>
+        public Dictionary<string, ParameterType> ParameterTypes { get; } = parameterTypes;
+
+        /// <summary>Typed parameters whose value failed to parse — bound as NULL.</summary>
+        public HashSet<string> InvalidTypedParameters { get; } = invalidTypedParameters;
 
         /// <summary>The single instant every <c>{now}</c> in this resolution renders.</summary>
         public DateTime GeneratedAt { get; } = generatedAt;

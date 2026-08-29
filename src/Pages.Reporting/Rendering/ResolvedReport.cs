@@ -13,7 +13,8 @@ public sealed class ResolvedReport
         IReadOnlyList<ConnectionFailure>? connectionFailures = null,
         IReadOnlyDictionary<string, ResolvedData>? dataSets = null,
         IReadOnlyDictionary<string, string?>? parameters = null,
-        DateTime? generatedAt = null)
+        DateTime? generatedAt = null,
+        IReadOnlyList<ParameterProblem>? parameterProblems = null)
     {
         Definition = definition;
         _data = data;
@@ -21,6 +22,7 @@ public sealed class ResolvedReport
         DataSets = dataSets ?? new Dictionary<string, ResolvedData>(StringComparer.OrdinalIgnoreCase);
         Parameters = parameters ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         GeneratedAt = generatedAt ?? DateTime.Now;
+        ParameterProblems = parameterProblems ?? [];
     }
 
     public Report Definition { get; }
@@ -50,6 +52,14 @@ public sealed class ResolvedReport
     /// <summary>The instant this report was generated — the value every <c>{now}</c> renders.</summary>
     public DateTime GeneratedAt { get; }
 
+    /// <summary>
+    /// Runtime parameter values that were not valid for their declared type and so were
+    /// filtered as SQL <c>NULL</c>. Surfaced as a report-level banner so the reader is not left
+    /// with a silently empty report. Authoring mistakes in a <em>default</em> are caught
+    /// earlier, in the designer.
+    /// </summary>
+    public IReadOnlyList<ParameterProblem> ParameterProblems { get; }
+
     public ResolvedData GetData(ReportElement element) =>
         _data.TryGetValue(element, out var data) ? data : ResolvedData.Empty;
 }
@@ -61,6 +71,11 @@ public sealed class ResolvedReport
 /// carry the connection string. The provider detail is logged server-side instead.
 /// </param>
 public sealed record ConnectionFailure(string Connection, string Message);
+
+/// <summary>A runtime parameter value that did not match its declared type.</summary>
+/// <param name="Parameter">The parameter name as declared in the report.</param>
+/// <param name="Message">A reader-facing explanation, e.g. <c>… is not a valid date</c>.</param>
+public sealed record ParameterProblem(string Parameter, string Message);
 
 /// <summary>Data fetched for one element: a scalar, a table, or a per-element error.</summary>
 public sealed class ResolvedData

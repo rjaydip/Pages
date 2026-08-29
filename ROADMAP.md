@@ -40,7 +40,7 @@ Ordered by how much it is asked for and how central it is to real reporting work
 | 2 | Adjustable column widths + row/header heights | Tables |
 | ~~3~~ | ~~Connection strings supplied at runtime~~ — shipped 0.3.0 | Data |
 | 4 | `ImageElement` (static + per-row) | Content |
-| 5 | Typed parameters | Data |
+| ~~5~~ | ~~Typed parameters~~ — shipped 0.3.0 | Data |
 | 6 | Culture-aware formatting | Tables |
 | 7 | Designer undo/redo, copy/paste, multi-select, guides | Designer |
 | 8 | Text expression language (`{= … }`) — arithmetic, conditionals, string/date functions | Data |
@@ -75,10 +75,10 @@ Ordered by how much it is asked for and how central it is to real reporting work
 - ~~**Host-supplied parameters**~~ — **shipped 0.3.0.** `ParameterDefinition.AcceptsUserInput`
   — a parameter can be a reader fill-in field or host-supplied (the signed-in user, tenant),
   one `@name` / `{@name}` syntax for both. See [the report definition](report-definition.md#parameters).
-- **Typed parameters** *(priority 5)*. `ParameterDefinition` is a name and a string default. A
-  type (number, date, boolean, or a list of allowed values) would drive real inputs in
-  `<ReportParameters>` instead of a text box, and let the designer validate before running a
-  query.
+- ~~**Typed parameters**~~ — **shipped 0.3.0.** `ParameterDefinition.Type` (`text` / `number` /
+  `date` / `boolean` / `list`) drives a real input control in `<ReportParameters>`, binds
+  `number`/`boolean` as a CLR type, and the designer flags a default that doesn't parse.
+  Culture-aware parsing is 0.4.0. See [the report definition](report-definition.md#parameter-types).
 - **Text expression language** *(priority 8)*. A `{= … }` sigil with arithmetic, comparisons,
   `if` / `coalesce`, and string / number / date functions, over data-set values, parameters,
   and `now` / `today`. Designed to also drive per-column table expressions and the
@@ -119,7 +119,7 @@ How the planned work is expected to land. Themed so a release is coherent rather
 from each group; order and contents move with demand.
 
 - **0.3.0 — "Data at runtime"** — connection strings supplied at generation time (3, **done**),
-  host-supplied parameters (**done**), typed parameters (5). Mostly additive.
+  host-supplied parameters (**done**), typed parameters (5, **done**). Mostly additive.
 - **0.4.0 — "Tables"** — conditional and per-column formatting (1), column widths and row/header
   heights (2), row numbering and running totals, the `{= … }` text expression language (8),
   culture-aware formatting (6). The heaviest group, so it gets its own release.

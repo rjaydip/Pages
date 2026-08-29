@@ -190,9 +190,49 @@ the result to `<ReportView>`:
 ```
 
 It renders nothing when a report has no reader fill-in parameters, so it is safe to place
-unconditionally. An empty box means "use that parameter's default" — the name is left out of
-the dictionary rather than sent as an empty string. The page (or this component) needs an
-interactive render mode, e.g. `@rendermode InteractiveServer`.
+unconditionally. An empty box (or the "(default)" option) means "use that parameter's default"
+— the name is left out of the dictionary rather than sent as an empty string. The page (or
+this component) needs an interactive render mode, e.g. `@rendermode InteractiveServer`.
+
+### Parameter types
+
+`type` (default `text`) decides the input control `<ReportParameters>` renders and how the
+value binds to SQL:
+
+| `type` | Input control | Bound to SQL as | Value format |
+|---|---|---|---|
+| `text` | text box | text, unless it reads exactly as a number (see below) | any string |
+| `number` | number spinner | integer or decimal | invariant, `.` decimal, no thousands separator |
+| `date` | native date picker | ISO date string (every provider converts it) | `YYYY-MM-DD` |
+| `boolean` | checkbox | `1` or `0` | `true` / `false` or `1` / `0` |
+| `list` | dropdown of `allowedValues` | text (the chosen value) | one of the declared values |
+
+A boolean binds `1` / `0` — the form a `bit` / `INTEGER` / `TINYINT` column expects on SQL
+Server, SQLite and MySQL. Against a native PostgreSQL `boolean` column compare with `@p = 1`,
+or use a `text` parameter. The checkbox always sends a value; it starts from the parameter's
+default, so leaving it untouched matches the default. `{@name}` renders `1` / `0`.
+
+```json
+"parameters": [
+  { "name": "minRev", "type": "number", "defaultValue": "1000" },
+  { "name": "asOf",   "type": "date",   "defaultValue": "2026-01-01" },
+  { "name": "active",  "type": "boolean", "defaultValue": "true" },
+  { "name": "region", "type": "list", "defaultValue": "EU",
+    "allowedValues": [ { "value": "EU", "label": "European Union" }, { "value": "US" } ] }
+]
+```
+
+- A `list` option's `value` is what a query and `{@name}` receive; `label` (optional) is the
+  text shown to the reader.
+- A typed value the reader picks is **canonicalised** — `{@asOf}` and `WHERE d <= @asOf` both
+  see `2026-01-09` even if `2026-1-9` was typed or supplied.
+- A value that doesn't match its type (only possible from a host-supplied dictionary or a bad
+  default — the input controls can't produce one) is **filtered as SQL `NULL`** and the report
+  shows a banner naming the parameter. Fix a bad *default* in the designer — it flags one.
+- Parsing is **InvariantCulture / ISO-8601**. A report-level culture is a later feature; it
+  will format `{dataSet.Column}` values, not `{@param}` values.
+- A `number` compared to a currency column binds a `decimal`, so `WHERE Amount = @exact` is
+  exact. (On SQLite a decimal parameter compares numerically all the same.)
 
 ### Rules
 
@@ -208,14 +248,15 @@ interactive render mode, e.g. `@rendermode InteractiveServer`.
 
 ### Numbers vs. zero-padded codes
 
-**Values travel as strings, and are bound as numbers only when the text is exactly how that
+An untyped (`text`) parameter is **bound as a number only when the text is exactly how that
 number writes itself.** `"5000"` binds as a number, so `Revenue >= @minRevenue` compares
 numerically. `"02"` does *not* — a zero-padded code is not the number 2, and binding it as one
 would stop it matching the text column it came from. The same rule keeps `" 2"`, `"+2"` and
 `"1,000"` as text, while `"1.50"` binds as a number and keeps its scale.
 
-This matters most for zero-padded keys. `strftime('%m', SaleDate)` yields `'02'`, so the
-parameter must be `02` — passing `2` correctly matches nothing:
+`"type": "number"` **overrides** this — the value is always bound numerically, so `"02"` binds
+as `2`. Keep a zero-padded code as `text` (or a `list`). `strftime('%m', SaleDate)` yields
+`'02'`, so the `text` parameter must be `02` — passing `2` matches nothing:
 
 ```json
 "parameters": [ { "name": "month", "defaultValue": "02" } ],
@@ -225,6 +266,20 @@ parameter must be `02` — passing `2` correctly matches nothing:
 
 Note the placeholder is bare. Quoting it — `= '@month'` — makes it a SQL string literal
 containing the eight characters `@month`, which matches nothing and raises no error.
+
+### Host-supplied value formats
+
+When you build the values dictionary yourself (rather than through `<ReportParameters>`), a
+typed parameter's string must match the format its type expects, or it is filtered as `NULL`:
+
+| `type` | Accepts |
+|---|---|
+| `number` | an invariant number — `.` for the decimal point, no thousands separator. Surrounding spaces and a leading sign are trimmed; the value is stored in canonical form |
+| `date` | `YYYY-MM-DD` (optionally `YYYY-MM-DDTHH:mm:ss`). No `MM/DD/YYYY`, no locale |
+| `boolean` | `true` / `false` (case-insensitive) or `1` / `0`. Stored and bound as `1` / `0` |
+| `list` | one of the declared option values (an out-of-list value is filtered as `NULL` and warned) |
+
+An omitted key still means "use the default", for every type.
 
 ## Connection-string encryption
 

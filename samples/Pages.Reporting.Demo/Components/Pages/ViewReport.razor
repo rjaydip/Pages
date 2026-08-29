@@ -23,6 +23,7 @@ else
         <a class="demo-button @(IsStaging ? null : "primary")" href="@($"/reports/{Id}{QueryFor(null)}")">Production</a>
         <a class="demo-button @(IsStaging ? "primary" : null)" href="@($"/reports/{Id}{QueryFor("staging")}")">Staging</a>
         <span class="spacer"></span>
+        <a class="demo-button" href="/reports/@Id/run">Run with parameters</a>
         <a class="demo-button" href="/reports/@Id/designer">Open in designer</a>
         <a class="demo-button" href="/reports/@Id/builder">Open in builder</a>
         <a class="demo-button primary" href="/api/reports/@Id/pdf@(_query)" target="_blank">Download PDF</a>

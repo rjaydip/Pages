@@ -24,7 +24,8 @@ entirely with your own CSS.
 | `pr-left` / `pr-center` / `pr-right` | cell alignment |
 | `pr-section`, `pr-row` / `pr-column`, `pr-section-body` | layout sections |
 | `pr-error`, `pr-loading` | states |
-| `pr-params`, `pr-param`, `pr-param-label`, `pr-param-input`, `pr-params-apply` | `<ReportParameters>` — the optional runtime parameter form. Not part of the report itself, so it never appears in a PDF |
+| `pr-params`, `pr-param`, `pr-param-label`, `pr-param-input`, `pr-param-select`, `pr-param-check`, `pr-params-apply` | `<ReportParameters>` — the optional runtime parameter form. `pr-param-input` covers the text / number / date boxes (distinguish via `[type=number]` / `[type=date]`); `pr-param-select` is the list dropdown; `pr-param-check` is the boolean checkbox. Not part of the report itself, so it never appears in a PDF |
+| `pr-param-warning` | a report-level banner when a runtime parameter value did not match its declared type |
 
 ## 2. Per-component `cssClass`
 

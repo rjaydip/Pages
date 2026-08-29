@@ -1,0 +1,54 @@
+@page "/reports/{Id:int}/run"
+@rendermode InteractiveServer
+@* Runs a stored report on-screen with a live <ReportParameters> form — the interactive
+   counterpart to /reports/{id} (which streams the PDF). This is where typed parameters show
+   their input controls. A real app merges any host-supplied values on top of what the reader
+   sets before handing the map to <ReportView>; the demo has no host values, so it passes the
+   reader map straight through. *@
+@inject ReportRepository Reports
+
+<PageTitle>@(_report?.Name ?? "Report") — Pages.Reporting demo</PageTitle>
+
+<div class="demo-toolbar">
+    <a class="demo-button" href="/">← All reports</a>
+    <a class="demo-button" href="/reports/@Id">View as PDF</a>
+    <a class="demo-button" href="/reports/@Id/designer">Open in designer</a>
+</div>
+
+@if (_report is null)
+{
+    <p>Report not found.</p>
+}
+else
+{
+    <div class="demo-card">
+        <ReportParameters Report="_definition" Values="_values" ValuesChanged="Apply" />
+    </div>
+    <div class="demo-card">
+        <ReportView Report="_definition" Parameters="_values" @key="_run" />
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private StoredReport? _report;
+    private Report _definition = new() { Name = "" };
+    private IReadOnlyDictionary<string, string?> _values = new Dictionary<string, string?>();
+    private int _run;
+
+    [Inject] private global::Pages.Reporting.Core.Serialization.ReportJson Json { get; set; } = default!;
+
+    protected override void OnParametersSet()
+    {
+        _report = Reports.Get(Id);
+        if (_report is not null)
+            _definition = Json.Deserialize(_report.Json);
+    }
+
+    private void Apply(IReadOnlyDictionary<string, string?> values)
+    {
+        _values = values;
+        _run++;   // force <ReportView> to re-resolve against the new values
+    }
+}

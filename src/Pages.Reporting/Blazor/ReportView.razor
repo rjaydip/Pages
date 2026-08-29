@@ -91,7 +91,11 @@
     /// <summary>Disables interactive chrome (sorting, paging) for print/PDF rendering.</summary>
     [Parameter] public bool PrintMode { get; set; }
 
-    /// <summary>Runtime values overriding the report's parameter defaults (e.g. from the page URL).</summary>
+    /// <summary>
+    /// Values for the report's declared parameters — reader fill-in values (typically from
+    /// <c>&lt;ReportParameters&gt;</c> or the page URL) and host-supplied ones (the signed-in
+    /// user, the tenant) merged into one map by the caller.
+    /// </summary>
     [Parameter] public IReadOnlyDictionary<string, string?>? Parameters { get; set; }
 
     /// <summary>
@@ -243,7 +247,11 @@
         {
             var options = Parameters is null && ConnectionStrings is null
                 ? null
-                : new ReportRuntimeOptions { Parameters = Parameters, ConnectionStrings = ConnectionStrings };
+                : new ReportRuntimeOptions
+                {
+                    Parameters = Parameters,
+                    ConnectionStrings = ConnectionStrings,
+                };
             var resolved = Report is not null
                 ? await Generator.GenerateAsync(Report, options, cts.Token)
                 : await Generator.GenerateAsync(Json!, options, cts.Token);

@@ -19,21 +19,35 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
         ReportRuntimeOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        // One instant for the whole resolution, so every {now} in the report agrees — including
+        // a text element inside a group band, which is re-rendered per group at render time.
+        var generatedAt = DateTime.Now;
         var data = new Dictionary<ReportElement, ResolvedData>();
         var context = new ResolveContext(
+            report.Name,
             EffectiveParameters(report, options?.Parameters),
-            EffectiveConnectionStrings(report, options?.ConnectionStrings));
+            EffectiveConnectionStrings(report, options?.ConnectionStrings),
+            generatedAt);
+
+        var elements = Flatten(report.Bands.SelectMany(band => band.Elements)).ToList();
 
         try
         {
+            // Text tokens are substituted synchronously — and again, per group, at render time
+            // (see ScopedValues) — so every data set a token names must already be in the
+            // cache. Same pattern as the group pre-fetch below. GetDataSetAsync caches, so a
+            // data set a table binding also uses is not queried twice.
+            foreach (var name in TextDataSetNames(elements))
+                await GetDataSetAsync(report, name, context, cancellationToken);
+
             // Every element lives in a band now — bands are the report.
-            foreach (var element in Flatten(report.Bands.SelectMany(band => band.Elements)))
+            foreach (var element in elements)
             {
                 try
                 {
                     if (element is TextElement text)
                     {
-                        data[element] = await RenderTextAsync(report, text, context, cancellationToken);
+                        data[element] = RenderText(text, context);
                         continue;
                     }
 
@@ -69,7 +83,9 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
             await context.DisposeConnectionsAsync();
         }
 
-        return new ResolvedReport(report, data, context.Failures(), context.DataSets, context.ParameterValues);
+        return new ResolvedReport(
+            report, data, context.Failures(), context.DataSets,
+            context.ParameterValues, generatedAt);
     }
 
     /// <summary>
@@ -82,8 +98,10 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
         // designer/discovery: parameter defaults apply, and connections are always the
         // authored ones — there is no runtime channel here.
         var context = new ResolveContext(
+            report.Name,
             EffectiveParameters(report, overrides: null),
-            EffectiveConnectionStrings(report, overrides: null));
+            EffectiveConnectionStrings(report, overrides: null),
+            DateTime.Now);
         try
         {
             return await ExecuteAsync(report, binding, context, cancellationToken);
@@ -239,17 +257,19 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
     }
 
     /// <summary>
-    /// Rebuilds a host-supplied map with a case-insensitive comparer — the caller's dictionary
-    /// is usually ordinal (e.g. projected straight from a query string). A last-wins loop
-    /// rather than the <see cref="Dictionary{TKey,TValue}"/> copy constructor, which throws
-    /// when two keys collide only under the new comparer.
+    /// Rebuilds a host-supplied map with a case-insensitive comparer and a leading <c>@</c>
+    /// stripped from each key — the caller's dictionary is usually ordinal (e.g. projected
+    /// straight from a query string), and a caller passing <c>"@region"</c> should hit the
+    /// same parameter as <c>"region"</c>. A last-wins loop rather than the
+    /// <see cref="Dictionary{TKey,TValue}"/> copy constructor, which throws when two keys
+    /// collide only under the new comparer.
     /// </summary>
     private static Dictionary<string, string?> NormalizeKeys(IReadOnlyDictionary<string, string?>? source)
     {
         var normalized = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         if (source is not null)
             foreach (var (key, value) in source)
-                normalized[key] = value;
+                normalized[key.TrimStart('@')] = value;
         return normalized;
     }
 
@@ -280,72 +300,32 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
     }
 
     /// <summary>
-    /// Renders a text template: literal runs pass through, each {dataSet.Column:agg:fmt}
-    /// expression reads the shared data set cache, {@param} reads the effective parameters.
-    /// A failed expression renders inline (⚠) without breaking the rest of the text.
+    /// Renders a text template against the resolver's caches: literal runs pass through, each
+    /// {dataSet.Column:agg:fmt} expression reads the shared data set cache, {@name} reads the
+    /// effective parameter map. A failed expression renders inline (⚠) without breaking the
+    /// rest of the text. The same tokens are re-rendered per group at render time by
+    /// <see cref="ScopedValues"/> — both go through <see cref="TextRenderer"/>.
     /// </summary>
-    private async Task<ResolvedData> RenderTextAsync(
-        Report report,
-        TextElement element,
-        ResolveContext context,
-        CancellationToken cancellationToken)
+    private static ResolvedData RenderText(TextElement element, ResolveContext context)
     {
-        var result = new System.Text.StringBuilder();
-        foreach (var token in TextTemplate.Tokenize(element.Content))
-        {
-            if (token.Expression is not { } expression)
-            {
-                result.Append(token.Raw);
-                continue;
-            }
-
-            if (expression.Builtin is not BuiltinToken.None)
-            {
-                result.Append(expression.Builtin switch
-                {
-                    BuiltinToken.ReportName => report.Name,
-                    BuiltinToken.Now => ValueFormatter.Format(DateTime.Now, expression.Format),
-                    // Only the printer knows these — defer via a placeholder (see PageTokens).
-                    BuiltinToken.Page => PageTokens.PagePlaceholder.ToString(),
-                    BuiltinToken.Pages => PageTokens.PagesPlaceholder.ToString(),
-                    _ => string.Empty,
-                });
-                continue;
-            }
-
-            if (expression.Parameter is { } parameterName)
-            {
-                result.Append(context.ParameterValues.TryGetValue(parameterName, out var value)
-                    ? value
-                    : $"⚠ unknown parameter '{parameterName}'");
-                continue;
-            }
-
-            // "group" is the reserved scope namespace, resolved at render time by ScopedValues
-            // against the enclosing group's rows. Outside a group there is no value to show, so
-            // it renders empty — claiming the report is missing a data set by that name would be
-            // both false and, on an empty result set, the only thing the reader sees.
-            if (string.Equals(expression.DataSet, ScopedValues.GroupDataSet, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var data = await GetDataSetAsync(report, expression.DataSet!, context, cancellationToken);
-            if (data.Error is not null)
-            {
-                result.Append($"⚠ {data.Error}");
-                continue;
-            }
-
-            var scalar = ExtractScalar(data.Table!, new DataSetBinding
-            {
-                Name = expression.DataSet!,
-                Field = expression.Column,
-                Aggregate = expression.Aggregate,
-            });
-            result.Append(ValueFormatter.Format(scalar.Scalar, expression.Format));
-        }
-
-        return new ResolvedData { Scalar = result.ToString() };
+        var text = TextRenderer.Render(
+            TextTemplate.Tokenize(element.Content),
+            new ResolveTimeScope(context),
+            element.RenderHtml);
+        return new ResolvedData { Scalar = text };
     }
+
+    /// <summary>Distinct data set names referenced by a text token (the reserved "group" excluded).</summary>
+    private static IEnumerable<string> TextDataSetNames(IEnumerable<ReportElement> elements) =>
+        elements
+            .OfType<TextElement>()
+            .SelectMany(element => TextTemplate.Tokenize(element.Content))
+            .Select(token => token.Expression)
+            .OfType<TextTemplate.DataSetExpr>()
+            .Where(expression => !string.Equals(
+                expression.DataSet, ScopedValues.GroupDataSet, StringComparison.OrdinalIgnoreCase))
+            .Select(expression => expression.DataSet)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Runs a data set's query at most once per resolution; every consumer shares the result.</summary>
     private async Task<ResolvedData> GetDataSetAsync(
@@ -382,10 +362,6 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
         context.DataSets[name] = data;
         return data;
     }
-
-    /// <summary>Reduces a data set column to the single value a text token shows.</summary>
-    private static ResolvedData ExtractScalar(ReportDataTable table, DataSetBinding reference) =>
-        new() { Scalar = ScalarValues.Extract(table, reference.Field, reference.Aggregate) };
 
     private async Task<DbConnection> GetOpenConnectionAsync(
         Report report,
@@ -463,15 +439,20 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
     }
 
     /// <summary>
-    /// Per-resolution state: the open connections, the data-set cache every consumer shares,
-    /// the effective parameter values, the runtime connection-string overrides, and the
-    /// connections that failed to open. Single-threaded by construction — one resolution at a
-    /// time — which is why the runtime inputs can be plain method arguments.
+    /// Per-resolution state: the report name, the open connections, the data-set cache every
+    /// consumer shares, the effective parameter values, the runtime connection-string
+    /// overrides, the one generation instant, and the connections that failed to open.
+    /// Single-threaded by construction — one resolution at a time — which is why the runtime
+    /// inputs can be plain method arguments.
     /// </summary>
     private sealed class ResolveContext(
+        string reportName,
         Dictionary<string, string?> parameterValues,
-        Dictionary<string, string?> connectionOverrides)
+        Dictionary<string, string?> connectionOverrides,
+        DateTime generatedAt)
     {
+        public string ReportName { get; } = reportName;
+
         public Dictionary<string, DbConnection> Connections { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public Dictionary<string, ResolvedData> DataSets { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -482,6 +463,9 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
         public Dictionary<string, string?> ConnectionOverrides { get; } = connectionOverrides;
 
         public Dictionary<string, string?> ParameterValues { get; } = parameterValues;
+
+        /// <summary>The single instant every <c>{now}</c> in this resolution renders.</summary>
+        public DateTime GeneratedAt { get; } = generatedAt;
 
         public IReadOnlyList<ConnectionFailure> Failures() =>
             ConnectionErrors.Count == 0
@@ -494,6 +478,39 @@ public sealed class ReportDataResolver(IReportCipher cipher, ILogger<ReportDataR
                 await connection.DisposeAsync();
             Connections.Clear();
         }
+    }
+
+    /// <summary>
+    /// <see cref="IValueScope"/> over the resolver's caches: the whole data set, no group. The
+    /// text pre-pass has already populated <see cref="ResolveContext.DataSets"/> for every name
+    /// a token references, so column lookups are cache hits.
+    /// </summary>
+    private sealed class ResolveTimeScope(ResolveContext context) : IValueScope
+    {
+        public bool TryParameter(string name, out string? value) =>
+            context.ParameterValues.TryGetValue(name, out value);
+
+        public ColumnResult Column(string dataSet, string? column, ScalarAggregate aggregate)
+        {
+            if (!context.DataSets.TryGetValue(dataSet, out var resolved))
+                return ColumnResult.UnknownDataSet;
+            if (resolved.Error is not null)
+                return ColumnResult.Failed(resolved.Error);
+            if (resolved.Table is null)
+                return ColumnResult.Found(null);
+            return ColumnResult.Found(ScalarValues.Extract(resolved.Table, column, aggregate));
+        }
+
+        // Resolve time has no group — {group.x} is resolved per group at render time.
+        public GroupStatus Group(string? column, out object? value)
+        {
+            value = null;
+            return GroupStatus.NotInGroup;
+        }
+
+        public string ReportName => context.ReportName;
+
+        public DateTime Now => context.GeneratedAt;
     }
 
     private static ReportDataTable ToTable(InlineBinding inline)

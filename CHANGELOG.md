@@ -20,9 +20,10 @@ Planned scope (tick as it lands):
 - [ ] **Typed parameters** — a type on `ParameterDefinition` (number, date, boolean, list of
   allowed values) driving real inputs in `<ReportParameters>` and letting the designer
   validate before a query runs.
-- [ ] **More runtime variables and functions** — built-ins beyond page numbers (today's
-  date, user name, row index, running totals) and expression functions in text templates
-  (arithmetic, string, conditional, date maths).
+- [x] **One runtime-input concept.** A parameter can be a reader fill-in field or
+  host-supplied (`ParameterDefinition.AcceptsUserInput`); `{@name}` in text and `@name` in SQL
+  are the one syntax. The `{= … }` expression language and table row numbering / running-total
+  columns are tracked for 0.4.0.
 
 ### Added
 
@@ -35,8 +36,15 @@ Planned scope (tick as it lands):
   `ResolvedReport`.
 - **`ReportRuntimeOptions`** — the single object carrying everything supplied at generation
   time (`Parameters`, `ConnectionStrings`). Passed to `IReportGenerator.GenerateAsync`,
-  `PdfReportExporter.ExportAsync` and `ExcelReportExporter.ExportAsync`. `<ReportView>` gains a
-  matching `ConnectionStrings` parameter alongside `Parameters`.
+  `PdfReportExporter.ExportAsync` and `ExcelReportExporter.ExportAsync`. `<ReportView>` gains
+  a matching `ConnectionStrings` parameter alongside `Parameters`.
+- **`ParameterDefinition.AcceptsUserInput`** (JSON `acceptsUserInput`, default `true`). A
+  parameter marked `false` is host-supplied only — the signed-in user, the tenant, a
+  correlation id: it never appears in `<ReportParameters>`, but is still usable as `@name` in
+  SQL and `{@name}` in text. `<ReportParameters>` renders inputs only for parameters that
+  accept user input; the host merges those with its own values (host last) before passing
+  them on. Old report JSON without the field reads as `true` — every existing parameter is a
+  fill-in field, unchanged.
 
 ### Changed
 
@@ -49,6 +57,17 @@ Planned scope (tick as it lands):
   logged server-side at Warning. `Pages.Reporting` now depends on
   `Microsoft.Extensions.Logging.Abstractions`.
 - A blank connection string serialises as `""` rather than an encrypted empty token.
+- **`{@name}` values are HTML-escaped in a `renderHtml` text element** (they are data, not
+  markup — a value carrying `<`/`&` could previously inject tags). The author's own literal
+  markup is unaffected, and a value with no markup characters is byte-identical.
+- **Text-token substitution is one shared renderer** — the resolve-time and per-group
+  re-render paths were near-duplicate loops that could drift; they now share `TextRenderer`.
+  Token output is unchanged. Two second-order effects: `{now}` is captured once per
+  generation (two `{now}` in a report can no longer land a second apart), and when more than
+  one connection fails the order they appear in the report-level banner can differ, because
+  a data set named only by a text token is now queried in an up-front pass.
+- A map key with a leading `@` (`{ ["@region"] = … }`) now hits the same parameter as
+  `"region"`.
 
 ### Fixed
 

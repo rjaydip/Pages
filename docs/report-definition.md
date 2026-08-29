@@ -48,12 +48,15 @@ data sets and parameters:
 - `{dataSet.Column}` — first row's value; `{dataSet.Column:sum}` — aggregate
   (`first`/`sum`/`avg`/`count`/`min`/`max`); `{dataSet.Column:sum:C0}` — plus a .NET format
   string. Format-only also works (`{sales.Revenue:C0}`) since aggregates are known keywords.
-- `{@paramName}` inserts a report parameter's value; `{{` writes a literal `{`.
+- `{@name}` inserts a report parameter's value — declared reader fill-in values and
+  host-supplied ones alike (see [Parameters](#parameters)). `{{` writes a literal `{`.
 - Line breaks in `content` are preserved. A failed expression renders inline (⚠) without
   breaking the rest of the text.
 - `"renderHtml": true` renders the resolved content as raw HTML, so author-written tags
   (`<b>`, `<span style="…">`, …) take effect — on screen and in the PDF. Only enable it for
-  content you trust: the text is emitted unescaped.
+  content you trust: the author's own markup is emitted unescaped. `{@name}` and
+  `{reportName}` **values** are HTML-escaped in this mode so a host- or reader-supplied value
+  cannot inject tags; `{dataSet.Column}` values are not.
 
 ### Built-in tokens
 
@@ -68,6 +71,9 @@ Any text element can use these alongside the usual expressions:
 `{page}` and `{pages}` only produce real numbers in a `pageHeader`/`pageFooter` band, because
 only the printer knows what page it is on. Anywhere else — any other band type, the on-screen
 view, Excel — they read as `1`.
+
+`{now}` is captured once per generation, so every `{now}` in a report — including one that a
+group band re-renders per group — shows the same instant. It is the server's local time.
 
 ## Table columns
 
@@ -118,45 +124,87 @@ throwing, since a throw mid-render would take the whole PDF with it.
 
 ## Parameters
 
-Reports can declare named parameters with defaults; data set SQL references them as `@name`,
-and the host overrides them at generation time — a natural fit for URL query values:
+A report declares its named inputs once, in `parameters`. Data set SQL references one as
+`@name`, text as `{@name}`. The host supplies values at generation time, falling back to
+`defaultValue` when none is given.
 
 ```json
-"parameters": [ { "name": "minRevenue", "defaultValue": "0" } ],
-"dataSets":   [ { "name": "topSales", "binding": { "$type": "sql", "connection": "demo",
-                  "sql": "SELECT * FROM Sales WHERE Revenue >= @minRevenue" } } ]
+"parameters": [
+  { "name": "minRevenue", "defaultValue": "0" },
+  { "name": "user", "acceptsUserInput": false }
+],
+"dataSets": [ { "name": "topSales", "binding": { "$type": "sql", "connection": "demo",
+                "sql": "SELECT * FROM Sales WHERE Revenue >= @minRevenue" } } ]
 ```
 
 ```csharp
-var values = new Dictionary<string, string?> { ["minRevenue"] = "5000" }; // e.g. from the URL
+var values = new Dictionary<string, string?>
+{
+    ["minRevenue"] = readerInput,       // what the reader typed
+    ["user"] = User.Identity!.Name,     // host-supplied — set last, so a reader cannot spoof it
+};
 <ReportView Json="@json" Parameters="values" />
 byte[] pdf = await pdfExporter.ExportAsync(json, new ReportRuntimeOptions { Parameters = values });
 ```
 
 `GenerateAsync` and the `ExportAsync` overloads take a single `ReportRuntimeOptions` — it
-carries `Parameters` and (below) `ConnectionStrings`. `<ReportView>` keeps the discrete
-`Parameters` / `ConnectionStrings` parameters and builds the options object for you.
+carries `Parameters` and `ConnectionStrings` (below). `<ReportView>` keeps the discrete
+`Parameters` / `ConnectionStrings` component parameters and builds the options object for you.
+
+### Reader fill-in vs. host-supplied
+
+`acceptsUserInput` (default `true`) decides whether a parameter is a field the report reader
+sets or a value the host injects:
+
+| | `acceptsUserInput: true` | `acceptsUserInput: false` |
+|---|---|---|
+| Shown in `<ReportParameters>` | yes | no |
+| Set by | the reader (a form field, a URL value) | the host app only (`{@user}`, `{@tenant}`) |
+| Usable as `@name` in SQL and `{@name}` in text | yes | yes |
+
+The distinction is UI only — the resolver applies whatever value it is given for a declared
+name, regardless of the flag.
+
+### The `<ReportParameters>` form
 
 For a UI rather than a hard-coded dictionary, drop in the unstyled `<ReportParameters>`
-component. It renders one input per declared parameter, seeded from the defaults, and raises the
-values when the reader presses Apply:
+component. It renders one input per **reader fill-in** parameter, seeded from the defaults,
+and raises those values when the reader presses Apply. Your page merges the raised values with
+the host-supplied ones — host last, so a reader cannot override a host value — before handing
+the result to `<ReportView>`:
 
 ```razor
-<ReportParameters Report="report" Values="_values" ValuesChanged="v => _values = v" />
-<ReportView Report="report" Parameters="_values" />
+<ReportParameters Report="report" Values="_readerValues" ValuesChanged="v => _readerValues = v" />
+<ReportView Report="report" Parameters="Merged()" />
+
+@code {
+    IReadOnlyDictionary<string, string?> _readerValues = new Dictionary<string, string?>();
+
+    IReadOnlyDictionary<string, string?> Merged()
+    {
+        var m = new Dictionary<string, string?>(_readerValues, StringComparer.OrdinalIgnoreCase);
+        m["user"] = CurrentUser;          // host-supplied wins
+        return m;
+    }
+}
 ```
 
-It renders nothing at all when a report declares no parameters, so it is safe to place
-unconditionally. An empty box means "use that parameter's default" — the name is left out of the
-dictionary rather than sent as an empty string.
+It renders nothing when a report has no reader fill-in parameters, so it is safe to place
+unconditionally. An empty box means "use that parameter's default" — the name is left out of
+the dictionary rather than sent as an empty string. The page (or this component) needs an
+interactive render mode, e.g. `@rendermode InteractiveServer`.
 
-The page (or this component) needs an interactive render mode, e.g. `@rendermode InteractiveServer` —
-it applies values through `@onchange`/`@onsubmit` handlers rather than a form post, and those do
-nothing under static SSR.
+### Rules
 
-Only declared parameters are applied (unknown names are ignored), names are matched
-case-insensitively, and a parameter is bound to a query only when its `@name` appears in that
-SQL.
+- Only **declared** names are applied — an unknown key in the map is ignored, and `{@typo}`
+  in text renders `⚠ unknown parameter 'typo'`.
+- Names are matched **case-insensitively**; a leading `@` on a map key is ignored.
+- A value reaches a data set's query only when that query's SQL text contains `@name`.
+- **Take values from server configuration or your request context, not straight from
+  client-supplied input.** A value bound into a query is always a safe `DbParameter` (no SQL
+  injection), but the runtime map has no allow-list of its own — if you project a whole query
+  string into it, `?tenantId=999` from a reader's URL can change what a query returns. Filter
+  untrusted input to the names you intend readers to control, and set host values last.
 
 ### Numbers vs. zero-padded codes
 

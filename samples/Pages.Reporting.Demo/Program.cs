@@ -44,19 +44,24 @@ app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-// Export endpoints: the stored JSON goes in, PDF/Excel bytes come out. Request query
-// values (?minRevenue=5000) override the report's parameter defaults; ?env=staging points a
-// report's runtime-supplied "sales" connection at the second database.
-ReportRuntimeOptions RuntimeOptions(HttpRequest request) => new()
+// Export endpoints: the stored JSON goes in, PDF/Excel bytes come out. Reader fill-in values
+// come from the query string (?minRevenue=5000); host-supplied parameters (user, tenant) are
+// set server-side and overlaid last so a reader cannot override them from the URL.
+// ?env=staging points a report's runtime-supplied "sales" connection at the second database.
+ReportRuntimeOptions RuntimeOptions(HttpRequest request)
 {
-    Parameters = QueryParameters(request),
-    ConnectionStrings = EnvConnections(request),
-};
+    var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+    foreach (var (key, value) in request.Query)
+        values[key] = value.ToString();
 
-static Dictionary<string, string?>? QueryParameters(HttpRequest request) =>
-    request.Query.Count == 0
-        ? null
-        : request.Query.ToDictionary(kv => kv.Key, kv => (string?)kv.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+    // A real app reads the authenticated user here (HttpContext.User). The demo has no auth,
+    // so it uses the server's OS user — do not copy this into production. Host-wins: these
+    // overwrite anything a reader put in the query string.
+    values["user"] = Environment.UserName;
+    values["tenant"] = "acme";
+
+    return new() { Parameters = values, ConnectionStrings = EnvConnections(request) };
+}
 
 // A fixed, server-side map — the connection string never comes from the client, only the
 // environment name does. A real app would read these from configuration or a secret store.

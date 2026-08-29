@@ -26,10 +26,11 @@ project with `@rendermode InteractiveServer`; the rest of the app is unaffected.
 `<ReportParameters>` applies its values through event handlers rather than a form post, so it
 also needs an interactive render mode.
 
-Parameter values and runtime connection strings (see
+Host-supplied parameter values and runtime connection strings (see
 [the report definition](report-definition.md#connections-at-runtime)) are both supplied at
-generation time. Take them from server configuration or a secret store — never from a query
-string or other client-supplied input.
+generation time. Take those from server configuration or a secret store, and set them last so
+a reader-supplied value cannot override them — never wire a whole query string straight into
+the parameter map.
 
 ## Chromium, for PDF export
 

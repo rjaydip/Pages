@@ -80,7 +80,7 @@ public sealed class ExcelReportExporter(IReportGenerator generator)
                 cell.SetValue(PageTokens.Resolve(
                     scope is null
                         ? data.Scalar?.ToString()
-                        : ScopedValues.Render(report, scope, text.Content),
+                        : ScopedValues.Render(report, scope, text.Content, htmlContext: false),
                     PageTokenMode.Plain));
                 if (elementFont is not null)
                     cell.Style.Font.FontName = elementFont;

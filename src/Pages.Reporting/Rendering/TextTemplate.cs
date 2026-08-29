@@ -4,9 +4,9 @@ namespace Pages.Reporting.Core.Rendering;
 
 /// <summary>
 /// Tokenizer for <c>TextElement</c> content. Splits literal runs from
-/// <c>{dataSet.Column:aggregate:format}</c> / <c>{@param}</c> expressions;
-/// <c>{{</c> escapes a literal <c>{</c>. Shared by the resolver (real values)
-/// and the designer skeleton (ghost pills).
+/// <c>{dataSet.Column:aggregate:format}</c> and <c>{@param}</c> expressions; <c>{{</c>
+/// escapes a literal <c>{</c>. Shared by the resolver (resolve-time substitution) and
+/// <see cref="ScopedValues"/> (per-group re-render).
 /// </summary>
 public static class TextTemplate
 {
@@ -14,17 +14,32 @@ public static class TextTemplate
     public sealed record TextToken(string Raw, TextExpression? Expression);
 
     /// <summary>
-    /// A data set read (DataSet+Column), a parameter reference (Parameter), or a
-    /// built-in value (Builtin).
+    /// A parsed <c>{…}</c> expression. One of the sealed subtypes; an unrecognised body
+    /// leaves <see cref="TextToken.Expression"/> null and the token renders verbatim.
     /// </summary>
-    public sealed record TextExpression(
-        string? DataSet,
-        string? Column,
-        ScalarAggregate Aggregate,
-        string? Format,
-        string? Parameter,
-        BuiltinToken Builtin = BuiltinToken.None);
+    public abstract record TextExpression;
 
+    /// <summary><c>{@name}</c> — a declared report parameter.</summary>
+    public sealed record ParameterExpr(string Name) : TextExpression;
+
+    /// <summary><c>{page}</c> / <c>{pages}</c> / <c>{reportName}</c> / <c>{now:fmt}</c>.</summary>
+    public sealed record BuiltinExpr(BuiltinToken Token, string? Format) : TextExpression;
+
+    /// <summary>
+    /// <c>{dataSet.Column:aggregate:format}</c> — a value reduced from a data set. The
+    /// reserved data set name <c>group</c> reads the enclosing group instead of a query
+    /// result (see <see cref="ScopedValues"/>).
+    /// </summary>
+    public sealed record DataSetExpr(string DataSet, string? Column, ScalarAggregate Aggregate, string? Format) : TextExpression;
+
+    /// <summary>
+    /// Splits <paramref name="content"/> into literal runs and <c>{…}</c> tokens. The scan is
+    /// deliberately simple and its behaviour is a compatibility contract: <c>{{</c> is the only
+    /// escape (writes a literal <c>{</c>); the first <c>}</c> closes a token; an unterminated
+    /// <c>{</c> makes the rest of the string a literal run; and a <c>{…}</c> whose body
+    /// <see cref="ParseExpression"/> does not recognise becomes a literal token that renders
+    /// verbatim, braces included.
+    /// </summary>
     public static IReadOnlyList<TextToken> Tokenize(string? content)
     {
         var tokens = new List<TextToken>();
@@ -82,7 +97,7 @@ public static class TextTemplate
         if (inner.StartsWith('@'))
         {
             var parameter = inner[1..].Trim();
-            return parameter.Length == 0 ? null : new TextExpression(null, null, ScalarAggregate.First, null, parameter);
+            return parameter.Length == 0 ? null : new ParameterExpr(parameter);
         }
 
         // Built-ins are bare names, optionally with a format: {page}, {now:yyyy-MM-dd}.
@@ -96,7 +111,7 @@ public static class TextTemplate
             builtinFormat = inner[(colon + 1)..];
         }
         if (TryParseBuiltin(builtinName, out var builtin))
-            return new TextExpression(null, null, ScalarAggregate.First, builtinFormat, null, builtin);
+            return new BuiltinExpr(builtin, builtinFormat);
 
         var dot = inner.IndexOf('.');
         if (dot <= 0 || dot == inner.Length - 1)
@@ -125,7 +140,7 @@ public static class TextTemplate
                 format = string.Join(':', parts[next..]);
         }
 
-        return new TextExpression(dataSet, column, aggregate, format, null);
+        return new DataSetExpr(dataSet, column, aggregate, format);
     }
 
     private static bool TryParseBuiltin(string value, out BuiltinToken builtin)

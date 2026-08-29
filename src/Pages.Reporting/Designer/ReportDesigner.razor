@@ -48,9 +48,9 @@
                 </div>
                 @* Same paper sheet as the canvas; ReportView applies the page Style itself.
                    ConnectionStrings is deliberately not passed: the designer previews the
-                   report as authored, so a connection marked "supplied at generation time"
-                   shows its "must be supplied" banner here rather than silently reading a
-                   runtime value the finished report would get. *@
+                   report as authored, so a runtime-supplied connection shows its "must be
+                   supplied" banner rather than silently reading a value the finished report
+                   would get. A host-supplied parameter previews as its default value. *@
                 <div class="rd-page" style="@SheetCss()">
                     <ReportView Report="_report" Parameters="_previewParameters" @key="_previewVersion" />
                 </div>

@@ -17,9 +17,9 @@ Planned scope (tick as it lands):
 - [x] **Connection strings supplied at runtime** — pass a connection at generation time, the
   way parameters already are, so one definition runs against dev / staging / prod or a
   per-tenant database.
-- [ ] **Typed parameters** — a type on `ParameterDefinition` (number, date, boolean, list of
+- [x] **Typed parameters** — a type on `ParameterDefinition` (number, date, boolean, list of
   allowed values) driving real inputs in `<ReportParameters>` and letting the designer
-  validate before a query runs.
+  validate a default before a query runs.
 - [x] **One runtime-input concept.** A parameter can be a reader fill-in field or
   host-supplied (`ParameterDefinition.AcceptsUserInput`); `{@name}` in text and `@name` in SQL
   are the one syntax. The `{= … }` expression language and table row numbering / running-total
@@ -45,8 +45,17 @@ Planned scope (tick as it lands):
   accept user input; the host merges those with its own values (host last) before passing
   them on. Old report JSON without the field reads as `true` — every existing parameter is a
   fill-in field, unchanged.
-
-### Changed
+- **Typed parameters — `ParameterDefinition.Type`** (`text` default / `number` / `date` /
+  `boolean` / `list` with `allowedValues` as `{value, label}` pairs). `<ReportParameters>`
+  renders a matching control (number spinner, date picker, checkbox, choice dropdown). A
+  `number` binds as `decimal` (currency comparisons are exact); a `boolean` binds as `1` / `0`
+  (the form `bit` / `INTEGER` columns expect); a `date` binds a canonical ISO string. A typed
+  value the reader
+  picks is canonicalised — `{@name}` and the query see the same form. A value that doesn't
+  match its type (only reachable from a host dictionary or a bad default) is filtered as SQL
+  `NULL` and shows a report-level banner. The designer flags a default that doesn't parse for
+  its type. Parsing is InvariantCulture / ISO-8601 — a report-level culture is 0.4.0. Untyped
+  parameters (`type` absent) behave exactly as before.
 
 - **`GenerateAsync` / `ExportAsync` / `ResolveAsync` now take `ReportRuntimeOptions? options`
   in place of `IReadOnlyDictionary<string,string?>? parameters`.** Migration: wrap the map,
@@ -68,6 +77,10 @@ Planned scope (tick as it lands):
   a data set named only by a text token is now queried in an up-front pass.
 - A map key with a leading `@` (`{ ["@region"] = … }`) now hits the same parameter as
   `"region"`.
+- A `type: number` parameter binds to SQL as `decimal` (was `double` for a value with a
+  decimal point) — exact against `DECIMAL`/`MONEY` columns.
+- `{@name}` for a typed parameter emits the canonical form (`2026-1-9` → `2026-01-09`). No
+  existing report is affected — `type` defaults to `text`.
 
 ### Fixed
 

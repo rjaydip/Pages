@@ -204,7 +204,31 @@
     {
         <h3 class="rd-props-head">Parameter</h3>
         <label class="rd-field"><span>Name</span><input @bind="reportParameter.Name" @bind:after="NotifyChanged" /></label>
-        <label class="rd-field"><span>Default value</span><input @bind="reportParameter.DefaultValue" /></label>
+        <label class="rd-field">
+            <span>Type</span>
+            <select value="@reportParameter.Type" @onchange="e => ChangeParameterType(reportParameter, e)">
+                <option value="@ParameterType.Text">Text</option>
+                <option value="@ParameterType.Number">Number</option>
+                <option value="@ParameterType.Date">Date</option>
+                <option value="@ParameterType.Boolean">Yes / no</option>
+                <option value="@ParameterType.List">List of values</option>
+            </select>
+        </label>
+        @if (reportParameter.Type == ParameterType.List)
+        {
+            <label class="rd-field">
+                <span>Allowed values</span>
+                <input placeholder="North, South, EU=European Union"
+                       value="@AllowedValuesText(reportParameter)"
+                       @onchange="e => SetAllowedValues(reportParameter, (string?)e.Value)" />
+            </label>
+            <p class="rd-hint">
+                Comma-separated. Write <code>value=Label</code> to show the reader different text
+                than the value a query gets (<code>EU=European Union</code>); a bare word is used
+                for both. The default value must be one of these.
+            </p>
+        }
+        <label class="rd-field"><span>Default value</span><input @bind="reportParameter.DefaultValue" @bind:after="NotifyChanged" /></label>
         <label class="rd-check">
             <input type="checkbox" @bind="reportParameter.AcceptsUserInput" @bind:after="NotifyChanged" />
             <span>Reader can fill this in (uncheck for host-supplied values: signed-in user, tenant, …)</span>
@@ -214,6 +238,18 @@
             and in text as <code>@("{@" + (string.IsNullOrWhiteSpace(reportParameter.Name) ? "name" : reportParameter.Name) + "}")</code>.
             The host app supplies runtime values at view/export time; the default applies when none is given.
             When "Reader can fill this in" is on, it also appears in <code>&lt;ReportParameters&gt;</code>.
+            @switch (reportParameter.Type)
+            {
+                case ParameterType.Number:
+                    <span>Number: <code>02</code> becomes <code>2</code> — for codes and zero-padded values use Text or List.</span>
+                    break;
+                case ParameterType.Date:
+                    <span>Date format: <code>YYYY-MM-DD</code>.</span>
+                    break;
+                case ParameterType.Boolean:
+                    <span>Default: <code>true</code>/<code>false</code> or <code>1</code>/<code>0</code>. Binds to SQL as <code>1</code>/<code>0</code>.</span>
+                    break;
+            }
         </p>
         <button type="button" class="rd-remove" @onclick="() => OnRemoveItem.InvokeAsync(reportParameter)">Remove parameter</button>
     }
@@ -522,6 +558,43 @@
         }
         band.Type = type;
         NotifyChanged();
+    }
+
+    private async Task ChangeParameterType(ParameterDefinition parameter, ChangeEventArgs e)
+    {
+        if (!Enum.TryParse<ParameterType>(e.Value?.ToString(), out var type))
+            return;
+        parameter.Type = type;
+        if (type == ParameterType.List)
+            // Seed the first choice from the existing default so a freshly-switched list isn't
+            // immediately flagged as "default not among the allowed values".
+            parameter.AllowedValues ??= string.IsNullOrWhiteSpace(parameter.DefaultValue)
+                ? []
+                : [new ParameterOption(parameter.DefaultValue.Trim())];
+        else
+            parameter.AllowedValues = null;
+        await NotifyChanged();
+    }
+
+    private static string AllowedValuesText(ParameterDefinition parameter) =>
+        string.Join(", ", (parameter.AllowedValues ?? [])
+            .Select(option => option.Label is null ? option.Value : $"{option.Value}={option.Label}"));
+
+    private async Task SetAllowedValues(ParameterDefinition parameter, string? text)
+    {
+        var options = new List<ParameterOption>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in (text ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var split = entry.IndexOf('=');
+            var value = (split < 0 ? entry : entry[..split]).Trim();
+            var label = split < 0 ? null : entry[(split + 1)..].Trim();
+            if (value.Length == 0 || !seen.Add(value))
+                continue;
+            options.Add(new ParameterOption(value, string.IsNullOrEmpty(label) ? null : label));
+        }
+        parameter.AllowedValues = options.Count == 0 ? null : options;
+        await NotifyChanged();
     }
 
     // Group is null until a data set is chosen, so both setters materialise it. Field defaults

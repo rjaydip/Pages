@@ -36,7 +36,13 @@
            elements each quietly reading "unavailable". *@
         @foreach (var failure in _resolved.ConnectionFailures)
         {
-            <div class="pr-error pr-connection-error" style="@ConnectionErrorStyle">@failure.Message</div>
+            <div class="pr-error pr-connection-error" style="@BannerWarningStyle">@failure.Message</div>
+        }
+        @* A runtime parameter value that didn't match its declared type was filtered as NULL.
+           Say so once at the top, or the reader is left with a silently empty report. *@
+        @foreach (var problem in _resolved.ParameterProblems)
+        {
+            <div class="pr-error pr-param-warning" style="@BannerWarningStyle">@problem.Message</div>
         }
         <CascadingValue Value="_resolved" IsFixed="true">
             <CascadingValue Value="PrintMode" Name="PrintMode">
@@ -122,7 +128,7 @@
 
     // Structural, like the table's borders: the warning must be visible on screen, in the
     // designer, and in the PDF without any developer CSS.
-    private const string ConnectionErrorStyle =
+    private const string BannerWarningStyle =
         "border:1px solid #d98282;border-left-width:4px;border-radius:6px;background:#fdf2f2;"
         + "color:#8f2f2f;padding:10px 12px;margin-bottom:12px;font-size:13px;";
 

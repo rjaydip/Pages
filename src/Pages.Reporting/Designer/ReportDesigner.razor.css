@@ -255,7 +255,8 @@
 
 /* width + border-box because an <input>'s intrinsic size (roughly 20 characters) is wider
    than the panel, and that intrinsic width would otherwise push the card past 220px. */
-.rd-preview-params ::deep .pr-param-input {
+.rd-preview-params ::deep .pr-param-input,
+.rd-preview-params ::deep .pr-param-select {
     width: 100%;
     box-sizing: border-box;
     border: 1px solid rgba(0, 0, 0, 0.16);
@@ -267,9 +268,16 @@
     background: #fff;
 }
 
-.rd-preview-params ::deep .pr-param-input:focus {
+.rd-preview-params ::deep .pr-param-input:focus,
+.rd-preview-params ::deep .pr-param-select:focus {
     outline: none;
     border-color: #1a66c2;
+}
+
+.rd-preview-params ::deep .pr-param-check {
+    width: 16px;
+    height: 16px;
+    align-self: flex-start;
 }
 
 .rd-preview-params ::deep .pr-params-apply {

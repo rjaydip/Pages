@@ -59,7 +59,7 @@
     }
     else
     {
-        @if (BandSequence.Problems(_report) is { Count: > 0 } problems)
+        @if (BandSequence.Problems(_report).Concat(ParameterChecks.Problems(_report)).ToList() is { Count: > 0 } problems)
         {
             <div class="rd-warnings">
                 @foreach (var problem in problems)

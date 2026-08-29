@@ -1,11 +1,13 @@
 @* Runtime values for a report's reader fill-in parameters, for handing to <ReportView
    Parameters> or an exporter. Renders an input only for parameters that accept user input;
-   host-supplied parameters (AcceptsUserInput false) are the caller's to merge in. Unstyled
-   like every other pr-* component: the class names are the hooks and the consuming app
-   supplies the CSS.
+   host-supplied parameters (AcceptsUserInput false) are the caller's to merge in. The input
+   control matches the parameter's declared Type. Unstyled like every other pr-* component:
+   the class names are the hooks and the consuming app supplies the CSS.
 
    A <form> rather than a bare div so Enter applies and label/for pairing is real; submission is
-   prevented because there is nothing to post — the values go to the parent through a callback. *@
+   prevented because there is nothing to post — the values go to the parent through a callback.
+   A form of only boolean/list parameters loses Enter-to-submit (native <select> behaviour); the
+   Apply button is always present. *@
 @if (_fields.Count > 0)
 {
     <form class="pr-params" @onsubmit="Apply" @onsubmit:preventDefault>
@@ -17,9 +19,36 @@
                parameters and let an unblurred edit survive onto the wrong one. *@
             <div class="pr-param" @key="name">
                 <label class="pr-param-label" for="@InputId(name)">@name</label>
-                <input class="pr-param-input" id="@InputId(name)"
-                       value="@_draft.GetValueOrDefault(name)"
-                       @onchange="e => _draft[name] = (string?)e.Value" />
+                @switch (field.Type)
+                {
+                    case ParameterType.Boolean:
+                        <input class="pr-param-check" id="@InputId(name)" type="checkbox"
+                               checked="@(_draft.GetValueOrDefault(name) == "1")"
+                               @onchange="e => SetBool(name, e)" />
+                        break;
+                    case ParameterType.List:
+                        <select class="pr-param-select" id="@InputId(name)"
+                                @bind:get="_draft.GetValueOrDefault(name)" @bind:set="v => _draft[name] = v">
+                            <option value="">@DefaultLabel(field)</option>
+                            @foreach (var option in field.AllowedValues ?? [])
+                            {
+                                <option value="@option.Value">@(option.Label ?? option.Value)</option>
+                            }
+                        </select>
+                        break;
+                    case ParameterType.Number:
+                        <input class="pr-param-input" id="@InputId(name)" type="number" step="any" inputmode="decimal"
+                               value="@_draft.GetValueOrDefault(name)" @onchange="e => _draft[name] = (string?)e.Value" />
+                        break;
+                    case ParameterType.Date:
+                        <input class="pr-param-input" id="@InputId(name)" type="date"
+                               value="@_draft.GetValueOrDefault(name)" @onchange="e => _draft[name] = (string?)e.Value" />
+                        break;
+                    default:
+                        <input class="pr-param-input" id="@InputId(name)"
+                               value="@_draft.GetValueOrDefault(name)" @onchange="e => _draft[name] = (string?)e.Value" />
+                        break;
+                }
             </div>
         }
         <button class="pr-params-apply" type="submit">Apply</button>
@@ -86,7 +115,29 @@
                     ? supplied
                     : field.DefaultValue;
         }
+
+        // Every draft value is re-checked against the field's current type — a select cannot
+        // show a value that isn't one of its options, and an author changing a parameter's
+        // Type in the designer leaves the old free text behind. A boolean checkbox always has
+        // a state, so its seed is normalised to true/false (from the default); every other
+        // unusable value collapses to "" so the "(default)" option shows and Apply omits the
+        // key (⇒ resolver uses the default) rather than sending junk.
+        foreach (var field in _fields)
+        {
+            var name = Key(field);
+            var value = _draft.GetValueOrDefault(name);
+            if (field.Type is ParameterType.Boolean)
+                _draft[name] = value is "1" or "0" ? value : BooleanDefault(field);
+            else if (!string.IsNullOrEmpty(value) && !IsUsable(field, value))
+                _draft[name] = string.Empty;
+        }
     }
+
+    private static string BooleanDefault(ParameterDefinition field) =>
+        ParameterParsing.TryParse(field.DefaultValue, ParameterType.Boolean).Canonical ?? "0";
+
+    private void SetBool(string name, ChangeEventArgs e) =>
+        _draft[name] = e.Value is true ? "1" : "0";
 
     // The resolver strips a leading @ before matching (EffectiveParameters), so the dictionary
     // has to be keyed the same way or a parameter authored as "@minRevenue" silently never
@@ -95,27 +146,45 @@
 
     private string InputId(string name) => $"{_idPrefix}-{name}";
 
+    // The leading "(default — X)" option in a list select tells the reader what fires when
+    // they leave it there.
+    private string DefaultLabel(ParameterDefinition field)
+    {
+        if (string.IsNullOrEmpty(field.DefaultValue))
+            return "(default)";
+        var match = field.AllowedValues?.FirstOrDefault(o =>
+            string.Equals(o.Value, field.DefaultValue, StringComparison.Ordinal));
+        return match is null ? "(default)" : $"(default — {match.Label ?? match.Value})";
+    }
+
+    private static bool IsUsable(ParameterDefinition field, string value) => field.Type switch
+    {
+        ParameterType.List => field.AllowedValues?.Any(o => string.Equals(o.Value, value, StringComparison.Ordinal)) == true,
+        ParameterType.Number or ParameterType.Date => ParameterParsing.TryParse(value, field.Type).Valid,
+        _ => true,
+    };
+
     // Applied on submit, never per keystroke: each apply re-runs every data set's SQL, so live
     // binding would put a query on the database for every character typed.
     //
-    // An empty box means "use the default" — the name is left out of the dictionary entirely,
-    // because EffectiveParameters falls back to DefaultValue only for keys that are ABSENT.
-    // Sending "" instead would pin the parameter to an empty string with no way back to the
-    // default short of reloading. The trade is that a deliberately-empty value cannot be
-    // expressed, which a string-only parameter model can live with.
+    // An empty box (or the "(default)" option) means "use the default" — the name is left out
+    // of the dictionary entirely, because EffectiveParameters falls back to DefaultValue only
+    // for keys that are ABSENT. Sending "" instead would pin the parameter to an empty string
+    // with no way back to the default short of reloading.
     private Task Apply()
     {
         var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var field in _fields)
         {
             var name = Key(field);
-            if (_draft.GetValueOrDefault(name) is { Length: > 0 } value)
-                values[name] = value;
-            else
+            var raw = _draft.GetValueOrDefault(name);
+            if (string.IsNullOrEmpty(raw))
                 // An emptied box falls back to the default, so showing the default is the
                 // honest thing — otherwise the box disagrees with the value the report just
                 // resolved with, and with what the same component shows after a close/reopen.
                 _draft[name] = field.DefaultValue;
+            else
+                values[name] = field.Type is ParameterType.Number or ParameterType.Date ? raw.Trim() : raw;
         }
         return ValuesChanged.InvokeAsync(values);
     }

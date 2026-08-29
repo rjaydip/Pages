@@ -33,8 +33,10 @@ else
 
     // Outside a group the resolver already substituted every token. Inside one the same
     // element renders once per group with different values, so the template is re-rendered
-    // here against that group's rows.
+    // here against that group's rows. htmlContext follows RenderHtml: branch 1 below emits
+    // Raw as raw markup, so {@name}/{reportName} values must be encoded there; the other two
+    // branches encode the whole string themselves.
     private string Raw => Scope is null
         ? Data.Scalar?.ToString() ?? string.Empty
-        : ScopedValues.Render(Resolved, Scope, Element.Content);
+        : ScopedValues.Render(Resolved, Scope, Element.Content, htmlContext: Element.RenderHtml);
 }

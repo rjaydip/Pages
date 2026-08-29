@@ -12,13 +12,15 @@ public sealed class ResolvedReport
         Dictionary<ReportElement, ResolvedData> data,
         IReadOnlyList<ConnectionFailure>? connectionFailures = null,
         IReadOnlyDictionary<string, ResolvedData>? dataSets = null,
-        IReadOnlyDictionary<string, string?>? parameters = null)
+        IReadOnlyDictionary<string, string?>? parameters = null,
+        DateTime? generatedAt = null)
     {
         Definition = definition;
         _data = data;
         ConnectionFailures = connectionFailures ?? [];
         DataSets = dataSets ?? new Dictionary<string, ResolvedData>(StringComparer.OrdinalIgnoreCase);
         Parameters = parameters ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        GeneratedAt = generatedAt ?? DateTime.Now;
     }
 
     public Report Definition { get; }
@@ -38,11 +40,15 @@ public sealed class ResolvedReport
     public IReadOnlyDictionary<string, ResolvedData> DataSets { get; }
 
     /// <summary>
-    /// The effective parameter values this resolution ran with. Text is normally substituted
-    /// once, at resolve time, but a text element inside a group band is re-rendered per group
-    /// — so {@param} needs the same map available again at render time.
+    /// The effective parameter values this resolution ran with (reader fill-in and
+    /// host-supplied alike). Text is normally substituted once, at resolve time, but a text
+    /// element inside a group band is re-rendered per group — so {@name} needs the same map
+    /// available again at render time.
     /// </summary>
     public IReadOnlyDictionary<string, string?> Parameters { get; }
+
+    /// <summary>The instant this report was generated — the value every <c>{now}</c> renders.</summary>
+    public DateTime GeneratedAt { get; }
 
     public ResolvedData GetData(ReportElement element) =>
         _data.TryGetValue(element, out var data) ? data : ResolvedData.Empty;

@@ -1,6 +1,8 @@
-@* Runtime values for a report's declared parameters, for handing to <ReportView Parameters>
-   or an exporter. Unstyled like every other pr-* component: the class names are the hooks and
-   the consuming app supplies the CSS.
+@* Runtime values for a report's reader fill-in parameters, for handing to <ReportView
+   Parameters> or an exporter. Renders an input only for parameters that accept user input;
+   host-supplied parameters (AcceptsUserInput false) are the caller's to merge in. Unstyled
+   like every other pr-* component: the class names are the hooks and the consuming app
+   supplies the CSS.
 
    A <form> rather than a bare div so Enter applies and label/for pairing is real; submission is
    prevented because there is nothing to post — the values go to the parent through a callback. *@
@@ -52,12 +54,17 @@
         // A blank name is skipped because EffectiveParameters skips it too: a value supplied
         // for it could never reach the SQL, so the input would be a dead control.
         //
+        // A parameter that does not accept user input (AcceptsUserInput false) is host-supplied
+        // only — the signed-in user, the tenant — and must not appear as a box the reader can
+        // edit.
+        //
         // Duplicate names are collapsed to one input (keeping the last definition) because
         // EffectiveParameters is itself last-wins for duplicates — two inputs would imply a
         // distinction the model does not have. GroupBy preserves first-appearance order of
         // groups, which is what keeps the field order stable.
         _fields = Report.Parameters
             .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+            .Where(p => p.AcceptsUserInput)
             .GroupBy(Key, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.Last())
             .ToList();

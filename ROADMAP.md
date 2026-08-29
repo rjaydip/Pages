@@ -20,8 +20,10 @@ Worth stating, so nothing here is rebuilt by accident:
 - Table columns take a **.NET format string** (`"N2"`, `"C"`, `"d"`), an alignment, and an
   aggregate (`ColumnDefinition.Format` / `Align` / `Aggregate`); the table renders a real
   `<thead>` that Chromium repeats on every printed page.
-- Charts cover **bar, line and pie**. Report **parameters with defaults**, overridable at
-  generation time. An **SVG designer** showing bands to scale.
+- Charts cover **bar, line and pie**. An **SVG designer** showing bands to scale.
+- Report **parameters** with defaults, supplied at generation time — reader fill-in
+  (`<ReportParameters>`) or host-supplied (`ParameterDefinition.AcceptsUserInput = false`,
+  for the signed-in user / tenant / …), usable as `@name` in SQL and `{@name}` in text *(0.3.0)*.
 - **Connection strings supplied at runtime** — a connection marked `suppliedAtRuntime` takes
   its string from `ReportRuntimeOptions.ConnectionStrings` at generation time, so one
   definition runs against dev/staging/prod or a per-tenant database *(0.3.0)*.
@@ -41,7 +43,7 @@ Ordered by how much it is asked for and how central it is to real reporting work
 | 5 | Typed parameters | Data |
 | 6 | Culture-aware formatting | Tables |
 | 7 | Designer undo/redo, copy/paste, multi-select, guides | Designer |
-| 8 | More runtime variables and functions | Data |
+| 8 | Text expression language (`{= … }`) — arithmetic, conditionals, string/date functions | Data |
 | 9 | CSV and HTML export | Output |
 | 10 | Barcodes and QR codes | Content |
 | 11 | More chart types + axis/legend/colour control | Output |
@@ -57,6 +59,9 @@ Ordered by how much it is asked for and how central it is to real reporting work
 - **Adjustable header and row height, and column widths** *(priority 2)*. Column width is the gap
   that bites first: today the table is full-width with even columns, so a long description column
   cannot be given more room than a date column.
+- **Row numbering and running totals** *(with priority 1–2)*. A synthetic `{rowNumber}` column
+  and a `RunningSum` column aggregate — a table concern (there is no per-row scope in the model
+  today), so it lands with the rest of the tables work rather than with the text runtime values.
 - **Culture-aware formatting** *(priority 6)*. `ValueFormatter` formats invariantly, so `"C"`
   cannot produce `₹` or `€`, and dates cannot follow a locale. A report-level culture would fix
   both.
@@ -67,13 +72,17 @@ Ordered by how much it is asked for and how central it is to real reporting work
   marked `suppliedAtRuntime` takes its string from `ReportRuntimeOptions.ConnectionStrings` at
   generation time, so one definition runs against dev, staging and production, or a per-tenant
   database, without duplicating it. See [the report definition](report-definition.md#connections-at-runtime).
+- ~~**Host-supplied parameters**~~ — **shipped 0.3.0.** `ParameterDefinition.AcceptsUserInput`
+  — a parameter can be a reader fill-in field or host-supplied (the signed-in user, tenant),
+  one `@name` / `{@name}` syntax for both. See [the report definition](report-definition.md#parameters).
 - **Typed parameters** *(priority 5)*. `ParameterDefinition` is a name and a string default. A
   type (number, date, boolean, or a list of allowed values) would drive real inputs in
   `<ReportParameters>` instead of a text box, and let the designer validate before running a
   query.
-- **More runtime variables and functions** *(priority 8)*. Built-ins beyond page numbers —
-  today's date, user name, row index, running totals — and expression functions in text
-  templates: arithmetic, string operations, conditionals, date maths.
+- **Text expression language** *(priority 8)*. A `{= … }` sigil with arithmetic, comparisons,
+  `if` / `coalesce`, and string / number / date functions, over data-set values, parameters,
+  and `now` / `today`. Designed to also drive per-column table expressions and the
+  conditional formatting in priority 1.
 - **More data sources** *(unprioritised)*. REST/JSON APIs, and CSV or in-memory collections for
   reports whose data the host already has. The `DataBinding` model is the extension point; the
   resolver is the part that assumes ADO.NET.
@@ -110,9 +119,10 @@ How the planned work is expected to land. Themed so a release is coherent rather
 from each group; order and contents move with demand.
 
 - **0.3.0 — "Data at runtime"** — connection strings supplied at generation time (3, **done**),
-  typed parameters (5), and more runtime variables and functions (8). Mostly additive.
+  host-supplied parameters (**done**), typed parameters (5). Mostly additive.
 - **0.4.0 — "Tables"** — conditional and per-column formatting (1), column widths and row/header
-  heights (2), culture-aware formatting (6). The heaviest group, so it gets its own release.
+  heights (2), row numbering and running totals, the `{= … }` text expression language (8),
+  culture-aware formatting (6). The heaviest group, so it gets its own release.
 - **0.5.0 — "Content & output"** — `ImageElement` (4), barcodes and QR codes (10), CSV and HTML
   export (9).
 - **Ongoing** — designer polish (7) folded into whichever release has room; charts (11),

@@ -205,10 +205,15 @@
         <h3 class="rd-props-head">Parameter</h3>
         <label class="rd-field"><span>Name</span><input @bind="reportParameter.Name" @bind:after="NotifyChanged" /></label>
         <label class="rd-field"><span>Default value</span><input @bind="reportParameter.DefaultValue" /></label>
+        <label class="rd-check">
+            <input type="checkbox" @bind="reportParameter.AcceptsUserInput" @bind:after="NotifyChanged" />
+            <span>Reader can fill this in (uncheck for host-supplied values: signed-in user, tenant, …)</span>
+        </label>
         <p class="rd-hint">
-            Use it in data set SQL as <code>@("@" + (string.IsNullOrWhiteSpace(reportParameter.Name) ? "name" : reportParameter.Name))</code>.
-            The host app supplies runtime values at view/export time (e.g. from the page URL);
-            the default applies when none is given.
+            Use it in data set SQL as <code>@("@" + (string.IsNullOrWhiteSpace(reportParameter.Name) ? "name" : reportParameter.Name))</code>
+            and in text as <code>@("{@" + (string.IsNullOrWhiteSpace(reportParameter.Name) ? "name" : reportParameter.Name) + "}")</code>.
+            The host app supplies runtime values at view/export time; the default applies when none is given.
+            When "Reader can fill this in" is on, it also appears in <code>&lt;ReportParameters&gt;</code>.
         </p>
         <button type="button" class="rd-remove" @onclick="() => OnRemoveItem.InvokeAsync(reportParameter)">Remove parameter</button>
     }
@@ -329,7 +334,8 @@
                 <p class="rd-hint">
                     Mix text with data: <code>{sales.Revenue:sum:C0}</code> — aggregate
                     (first/sum/avg/count/min/max) and format are optional. <code>{@("@")param}</code>
-                    inserts a parameter; <code>{{</code> writes a literal brace.
+                    inserts a parameter (declared or host-supplied); <code>{{</code> writes a
+                    literal brace.
                     @if (Report.DataSets.Count > 0)
                     {
                         <span>Data sets: @string.Join(", ", Report.DataSets.Select(d => d.Name)).</span>
